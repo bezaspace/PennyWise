@@ -143,7 +143,7 @@ class ApiService {
 
   // AI Services
   async getFinancialAdvice(prompt: string): Promise<string> {
-    const response = await this.apiRequest<{ advice: string }>('/api/ai/financial-advice', {
+    const response = await this.apiRequest<{ advice: string }>('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ prompt }),
     });
