@@ -13,7 +13,7 @@ import {
 import { Send } from 'lucide-react-native';
 import { colors } from '@/constants/colors';
 import { globalStyles } from '@/constants/styles';
-import { apiService } from '@/services/api';
+import { geminiService } from '@/services/gemini';
 
 interface Message {
   id: string;
@@ -46,24 +46,43 @@ export default function AIChatScreen() {
     setInputText('');
     setIsLoading(true);
 
+    const aiMessageId = (Date.now() + 1).toString();
+    let aiMessageText = '';
+
+    // Add a placeholder AI message for streaming
+    setMessages(prev => [
+      ...prev,
+      {
+        id: aiMessageId,
+        text: '',
+        isUser: false,
+      },
+    ]);
+
     try {
-      const response = await apiService.getFinancialAdvice(inputText.trim());
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: response,
-        isUser: false,
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
+      const stream = geminiService.streamFinancialAdvice(inputText.trim());
+      for await (const chunk of stream) {
+        aiMessageText += chunk;
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === aiMessageId
+              ? { ...msg, text: aiMessageText }
+              : msg
+          )
+        );
+      }
     } catch (error) {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I apologize, but I'm having trouble connecting right now. Please check your internet connection and try again.",
-        isUser: false,
-      };
-
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === aiMessageId
+            ? {
+                ...msg,
+                text:
+                  "I apologize, but I'm having trouble connecting right now. Please check your internet connection and try again.",
+              }
+            : msg
+        )
+      );
     } finally {
       setIsLoading(false);
     }
