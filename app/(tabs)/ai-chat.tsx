@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import LiveAIVoiceChat from '@/components/LiveAIVoiceChat';
 import { 
   View, 
   Text, 
@@ -22,6 +23,7 @@ interface Message {
 }
 
 export default function AIChatScreen() {
+  const [voiceMode, setVoiceMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -88,6 +90,14 @@ export default function AIChatScreen() {
     }
   };
 
+  if (voiceMode) {
+    return (
+      <SafeAreaView style={globalStyles.safeArea}>
+        <LiveAIVoiceChat onBack={() => setVoiceMode(false)} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={globalStyles.safeArea}>
       <KeyboardAvoidingView 
@@ -96,6 +106,9 @@ export default function AIChatScreen() {
       >
         <View style={styles.header}>
           <Text style={styles.title}>AI Chat</Text>
+          <TouchableOpacity style={styles.voiceToggle} onPress={() => setVoiceMode(true)}>
+            <Text style={styles.voiceToggleText}>🎤 Live Voice Chat</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView 
@@ -178,6 +191,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
+  voiceToggle: {
+    marginLeft: 12,
+    backgroundColor: colors.primary[600],
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  voiceToggleText: {
+    color: colors.neutral[100],
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
     fontSize: 20,
     fontFamily: 'Inter-Bold',
     color: colors.neutral[100],

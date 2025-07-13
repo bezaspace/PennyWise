@@ -1,8 +1,9 @@
 import os
 from dotenv import load_dotenv; load_dotenv()
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, WebSocket
 from fastapi.responses import StreamingResponse
+import base64
 import asyncio
 from sqlalchemy.orm import Session
 import logging
@@ -22,9 +23,93 @@ class FinancialAdviceRequest(BaseModel):
 
 logger = logging.getLogger(__name__)
 
-# --- API Router ---
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
+
+# --- Live AI Voice Chat WebSocket Endpoint ---
+from google.adk.agents.run_config import RunConfig
+from google.adk.agents import LiveRequestQueue
+from google.genai.types import Content, Part, Blob
+import json
+
+@router.websocket("/voice/ws/{user_id}")
+async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
+    """WebSocket endpoint for live AI voice chat (bidirectional audio/text)."""
+    await websocket.accept()
+    session_id = f"{user_id}_session"
+    # Ensure session exists
+    try:
+        session = await session_service.get_session(
+            app_name="PennyWise", user_id=user_id, session_id=session_id
+        )
+    except Exception:
+        session = await session_service.create_session(
+            app_name="PennyWise", user_id=user_id, session_id=session_id
+        )
+
+    # Set up ADK live session for AUDIO modality
+    run_config = RunConfig(response_modalities=["AUDIO"])
+    live_request_queue = LiveRequestQueue()
+    live_events = runner.run_live(
+        session=session,
+        live_request_queue=live_request_queue,
+        run_config=run_config,
+    )
+
+    async def agent_to_client():
+        async for event in live_events:
+            # Handle turn complete/interrupted
+            if getattr(event, "turn_complete", False) or getattr(event, "interrupted", False):
+                message = {
+                    "turn_complete": getattr(event, "turn_complete", False),
+                    "interrupted": getattr(event, "interrupted", False),
+                }
+                await websocket.send_text(json.dumps(message))
+                continue
+            part = event.content.parts[0] if event.content and event.content.parts else None
+            if not part:
+                continue
+            # Audio response
+            if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
+                audio_data = part.inline_data.data
+                if audio_data:
+                    message = {
+                        "mime_type": "audio/pcm",
+                        "data": base64.b64encode(audio_data).decode("ascii")
+                    }
+                    await websocket.send_text(json.dumps(message))
+                continue
+            # Text response (optional, for transcript)
+            if getattr(part, "text", None) and getattr(event, "partial", False):
+                message = {
+                    "mime_type": "text/plain",
+                    "data": part.text
+                }
+                await websocket.send_text(json.dumps(message))
+
+    async def client_to_agent():
+        while True:
+            message_json = await websocket.receive_text()
+            message = json.loads(message_json)
+            mime_type = message.get("mime_type")
+            data = message.get("data")
+            if mime_type == "text/plain":
+                content = Content(role="user", parts=[Part.from_text(text=data)])
+                live_request_queue.send_content(content=content)
+            elif mime_type == "audio/pcm":
+                decoded_data = base64.b64decode(data)
+                live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+            else:
+                continue
+
+    # Run both directions concurrently
+    agent_task = asyncio.create_task(agent_to_client())
+    client_task = asyncio.create_task(client_to_agent())
+    done, pending = await asyncio.wait([agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION)
+    for task in pending:
+        task.cancel()
+    live_request_queue.close()
+    await websocket.close()
 
 @router.post("/chat/stream")
 async def chat_stream(request: FinancialAdviceRequest):

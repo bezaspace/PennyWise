@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Define the financial agent
 financial_agent = LlmAgent(
-    model="gemini-2.5-flash-lite-preview-06-17",
+    model="gemini-2.0-flash-live-001",
     name="FinancialAgent",
     instruction="""You are a helpful and friendly financial assistant.
 A user is asking for advice about their finances or wants to log a transaction.
