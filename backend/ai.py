@@ -8,8 +8,12 @@ import asyncio
 from sqlalchemy.orm import Session
 import logging
 from google.genai import types
+from google.genai.types import Content, Part, Blob
 from pydantic import BaseModel
 from google.adk.events import Event
+from google.adk.agents.run_config import RunConfig
+from google.adk.agents import LiveRequestQueue
+import json
 
 from database import get_db
 from adk_services import runner, session_service
@@ -27,89 +31,210 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ai", tags=["AI"])
 
 # --- Live AI Voice Chat WebSocket Endpoint ---
-from google.adk.agents.run_config import RunConfig
-from google.adk.agents import LiveRequestQueue
-from google.genai.types import Content, Part, Blob
 import json
 
 @router.websocket("/voice/ws/{user_id}")
 async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for live AI voice chat (bidirectional audio/text)."""
     await websocket.accept()
+    logger.info(f"Voice chat WebSocket connected for user: {user_id}")
+    
     session_id = f"{user_id}_session"
+    
     # Ensure session exists
     try:
         session = await session_service.get_session(
             app_name="PennyWise", user_id=user_id, session_id=session_id
         )
-    except Exception:
-        session = await session_service.create_session(
-            app_name="PennyWise", user_id=user_id, session_id=session_id
-        )
+        logger.info(f"Retrieved existing session: {session_id}")
+    except Exception as e:
+        logger.info(f"Creating new session: {session_id}, reason: {e}")
+        try:
+            session = await session_service.create_session(
+                app_name="PennyWise", user_id=user_id, session_id=session_id
+            )
+            logger.info(f"Successfully created new session: {session_id}")
+        except Exception as create_error:
+            logger.error(f"Failed to create session: {create_error}")
+            await websocket.close(code=1011, reason="Session creation failed")
+            return
 
-    # Set up ADK live session for AUDIO modality
-    run_config = RunConfig(response_modalities=["AUDIO"])
-    live_request_queue = LiveRequestQueue()
-    live_events = runner.run_live(
-        session=session,
-        live_request_queue=live_request_queue,
-        run_config=run_config,
-    )
+    # Set up ADK live session for AUDIO modality with optimized VAD
+    try:
+        run_config = RunConfig(
+            response_modalities=["AUDIO"],
+            realtime_input_config={
+                "automatic_activity_detection": {
+                    "disabled": False,  # Enable automatic VAD
+                    # Optimized settings for better responsiveness
+                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
+                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    "prefix_padding_ms": 200,  # Capture beginning of speech
+                    "silence_duration_ms": 600,  # Faster response time
+                }
+            }
+        )
+        
+        live_request_queue = LiveRequestQueue()
+        live_events = runner.run_live(
+            session=session,
+            live_request_queue=live_request_queue,
+            run_config=run_config,
+        )
+        logger.info("Live session started successfully with optimized VAD")
+        
+    except Exception as e:
+        logger.error(f"Failed to start live session: {e}")
+        await websocket.close(code=1011, reason="Live session setup failed")
+        return
 
     async def agent_to_client():
-        async for event in live_events:
-            # Handle turn complete/interrupted
-            if getattr(event, "turn_complete", False) or getattr(event, "interrupted", False):
-                message = {
-                    "turn_complete": getattr(event, "turn_complete", False),
-                    "interrupted": getattr(event, "interrupted", False),
-                }
-                await websocket.send_text(json.dumps(message))
-                continue
-            part = event.content.parts[0] if event.content and event.content.parts else None
-            if not part:
-                continue
-            # Audio response
-            if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
-                audio_data = part.inline_data.data
-                if audio_data:
+        try:
+            async for event in live_events:
+                # Handle turn complete/interrupted with immediate response
+                if getattr(event, "turn_complete", False):
+                    logger.info("AI turn completed")
                     message = {
-                        "mime_type": "audio/pcm",
-                        "data": base64.b64encode(audio_data).decode("ascii")
+                        "turn_complete": True,
+                        "interrupted": False,
                     }
                     await websocket.send_text(json.dumps(message))
-                continue
-            # Text response (optional, for transcript)
-            if getattr(part, "text", None) and getattr(event, "partial", False):
-                message = {
-                    "mime_type": "text/plain",
-                    "data": part.text
-                }
-                await websocket.send_text(json.dumps(message))
+                    continue
+                    
+                if getattr(event, "interrupted", False):
+                    logger.info("AI generation interrupted")
+                    message = {
+                        "turn_complete": False,
+                        "interrupted": True,
+                    }
+                    await websocket.send_text(json.dumps(message))
+                    continue
+
+                part = event.content.parts[0] if event.content and event.content.parts else None
+                if not part:
+                    continue
+                    
+                # Audio response - prioritize for immediate playback
+                if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
+                    audio_data = part.inline_data.data
+                    if audio_data:
+                        logger.debug(f"Sending audio response: {len(audio_data)} bytes")
+                        message = {
+                            "mime_type": "audio/pcm",
+                            "data": base64.b64encode(audio_data).decode("ascii")
+                        }
+                        await websocket.send_text(json.dumps(message))
+                    continue
+                    
+                # Text response (for live transcript during generation)
+                if getattr(part, "text", None):
+                    # Only send partial text if it's meaningful
+                    text_content = part.text.strip()
+                    if text_content and len(text_content) > 2:
+                        message = {
+                            "mime_type": "text/plain",
+                            "data": text_content,
+                            "partial": getattr(event, "partial", False)
+                        }
+                        await websocket.send_text(json.dumps(message))
+        except Exception as e:
+            logger.error(f"Error in agent_to_client: {e}")
+            # Send error message to client
+            error_message = {
+                "error": True,
+                "message": "Connection error occurred"
+            }
+            try:
+                await websocket.send_text(json.dumps(error_message))
+            except:
+                pass
 
     async def client_to_agent():
-        while True:
-            message_json = await websocket.receive_text()
-            message = json.loads(message_json)
-            mime_type = message.get("mime_type")
-            data = message.get("data")
-            if mime_type == "text/plain":
-                content = Content(role="user", parts=[Part.from_text(text=data)])
-                live_request_queue.send_content(content=content)
-            elif mime_type == "audio/pcm":
-                decoded_data = base64.b64decode(data)
-                live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
-            else:
-                continue
+        try:
+            while True:
+                message_json = await websocket.receive_text()
+                message = json.loads(message_json)
+                
+                # Handle interrupt message with priority
+                if message.get("type") == "interrupt":
+                    logger.info("Received interrupt signal from client")
+                    # Cancel current AI response immediately
+                    try:
+                        if hasattr(live_request_queue, "cancel"):
+                            live_request_queue.cancel()
+                        # Send activity end to flush any pending audio
+                        live_request_queue.send_realtime(activity_end=True)
+                        logger.info("Successfully processed interrupt")
+                    except Exception as e:
+                        logger.warning(f"Error during interrupt: {e}")
+                    continue
+                
+                mime_type = message.get("mime_type")
+                data = message.get("data")
+                
+                if mime_type == "text/plain" and data:
+                    content = types.Content(role="user", parts=[types.Part.from_text(text=data)])
+                    live_request_queue.send_content(content=content)
+                    
+                elif mime_type == "audio/pcm" and data:
+                    try:
+                        decoded_data = base64.b64decode(data)
+                        # Use send_realtime for immediate processing
+                        live_request_queue.send_realtime(
+                            types.Blob(data=decoded_data, mime_type="audio/pcm;rate=16000")
+                        )
+                        # Log audio data size occasionally for debugging
+                        if len(decoded_data) > 0:
+                            logger.debug(f"Processed audio chunk: {len(decoded_data)} bytes")
+                    except Exception as e:
+                        logger.warning(f"Error processing audio data: {e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Error in client_to_agent: {e}")
+            # Connection might be closed, break the loop
+            return
 
-    # Run both directions concurrently
-    agent_task = asyncio.create_task(agent_to_client())
-    client_task = asyncio.create_task(client_to_agent())
-    done, pending = await asyncio.wait([agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION)
-    for task in pending:
-        task.cancel()
-    live_request_queue.close()
-    await websocket.close()
+    # Run both directions concurrently with better error handling
+    try:
+        agent_task = asyncio.create_task(agent_to_client())
+        client_task = asyncio.create_task(client_to_agent())
+        
+        # Wait for either task to complete or fail
+        done, pending = await asyncio.wait(
+            [agent_task, client_task], 
+            return_when=asyncio.FIRST_EXCEPTION
+        )
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+                
+        # Check if any task raised an exception
+        for task in done:
+            try:
+                await task
+            except Exception as e:
+                logger.error(f"WebSocket task error: {e}")
+                
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}")
+    finally:
+        # Clean up resources
+        try:
+            live_request_queue.close()
+        except Exception as e:
+            logger.warning(f"Error closing live_request_queue: {e}")
+        
+        try:
+            if websocket.client_state.CONNECTED:
+                await websocket.close()
+        except Exception as e:
+            logger.warning(f"Error closing websocket: {e}")
 
 @router.post("/chat/stream")
 async def chat_stream(request: FinancialAdviceRequest):
