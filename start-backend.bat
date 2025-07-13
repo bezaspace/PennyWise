@@ -7,8 +7,8 @@ echo.
 
 cd backend
 
-echo 📦 Installing dependencies...
-pip install -r requirements.txt
+REM echo 📦 Installing dependencies...
+REM pip install -r requirements.txt
 
 if %errorlevel% neq 0 (
     echo.

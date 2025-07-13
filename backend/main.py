@@ -7,7 +7,7 @@ from typing import List, Dict
 import os
 from dotenv import load_dotenv
 
-from database import get_db, create_tables, seed_database
+from database import get_db, create_tables, seed_database, engine
 from models import (
     TransactionDB, BudgetDB, GoalDB,
     Transaction, TransactionCreate,
@@ -17,6 +17,7 @@ from models import (
     TransactionType
 )
 from ai import router as ai_router
+from adk_services import initialize_adk_services
 
 load_dotenv()
 
@@ -37,9 +38,26 @@ app.add_middleware(
 
 # Initialize database on startup
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     create_tables()
+    initialize_adk_services(engine)
     seed_database()
+    
+    # Pre-create the default session to avoid timing issues
+    try:
+        from adk_services import session_service
+        user_id = "user_123"
+        session_id = f"{user_id}_session"
+        
+        print(f"Pre-creating session: {session_id}")
+        session = await session_service.create_session(
+            app_name="PennyWise", user_id=user_id, session_id=session_id
+        )
+        print(f"✅ Session pre-created successfully: {session_id}")
+        
+    except Exception as e:
+        print(f"⚠️  Session pre-creation failed (may already exist): {e}")
+        # This is okay - session might already exist
 
 # Health check
 @app.get("/")

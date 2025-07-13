@@ -149,6 +149,40 @@ class ApiService {
     });
     return response.advice;
   }
+
+  /**
+   * Stream financial advice from the AI backend.
+   * Returns an async generator yielding text chunks.
+   */
+  async *streamFinancialAdvice(prompt: string): AsyncGenerator<string, void, unknown> {
+    const response = await fetch(`${this.apiBaseUrl}/api/ai/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt }),
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`Streaming API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let done = false;
+    let buffer = '';
+
+    while (!done) {
+      const { value, done: streamDone } = await reader.read();
+      done = streamDone;
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        // Yield each chunk as soon as it arrives
+        yield buffer;
+        buffer = '';
+      }
+    }
+  }
 }
 
 export const apiService = new ApiService();

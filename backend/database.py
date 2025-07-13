@@ -7,7 +7,10 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./finance_app.db")
+# Use absolute path for SQLite database to avoid path issues
+import os
+DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "finance_app.db")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

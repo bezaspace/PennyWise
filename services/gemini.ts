@@ -12,6 +12,14 @@ class GeminiService {
       return 'Unable to generate advice at this time. Please try again later.';
     }
   }
+
+  /**
+   * Stream financial advice from the AI backend.
+   * Returns an async generator yielding text chunks.
+   */
+  streamFinancialAdvice(prompt: string): AsyncGenerator<string, void, unknown> {
+    return apiService.streamFinancialAdvice(prompt);
+  }
 }
 
 export const geminiService = new GeminiService();
