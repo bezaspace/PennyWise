@@ -1,7 +1,61 @@
+import uuid
+from datetime import datetime
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TransactionDB, BudgetDB, GoalDB, TransactionType
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+def add_transaction(
+    user_id: str,
+    description: str,
+    amount: float,
+    category: Optional[str] = None,
+    type: Optional[str] = None,
+    date: Optional[str] = None
+) -> dict:
+    """
+    Adds a new transaction to the database. If category/type/date are missing, the AI can decide/fill them.
+    Args:
+        user_id (str): The ID of the user.
+        description (str): Description of the transaction (required).
+        amount (float): Amount spent or received (required).
+        category (str, optional): Category of the transaction. AI can fill if missing.
+        type (str, optional): 'income' or 'expense'. AI can fill if missing.
+        date (str, optional): Date in ISO format. Defaults to now if missing.
+    Returns:
+        dict: The created transaction as a dictionary.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        transaction_id = str(uuid.uuid4())
+        if not date:
+            date = datetime.now().isoformat()
+        if not category:
+            category = "miscellaneous"  # AI can override if it infers better
+        if not type:
+            type = "expense" if amount < 0 else "income"  # AI can override if it infers better
+        transaction = TransactionDB(
+            id=transaction_id,
+            description=description,
+            amount=amount,
+            category=category,
+            date=date,
+            type=TransactionType(type)
+        )
+        db.add(transaction)
+        db.commit()
+        db.refresh(transaction)
+        return {
+            "id": transaction.id,
+            "description": transaction.description,
+            "amount": transaction.amount,
+            "category": transaction.category,
+            "date": transaction.date,
+            "type": transaction.type.value,
+        }
+    finally:
+        next(db_gen, None)
 
 def get_db():
     db = SessionLocal()
@@ -35,7 +89,6 @@ def get_transactions(user_id: str) -> List[Dict[str, Any]]:
     finally:
         next(db_gen, None)
 
-
 def get_budgets(user_id: str) -> List[Dict[str, Any]]:
     """
     Retrieves the current budgets for a given user.
@@ -59,7 +112,6 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
         ]
     finally:
         next(db_gen, None)
-
 
 def get_goals(user_id: str) -> List[Dict[str, Any]]:
     """
