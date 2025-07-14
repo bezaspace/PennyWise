@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { colors } from '@/constants/colors';
+import ReceiptUpload from './ReceiptUpload';
 
 interface VoiceMessage {
   id: string;
@@ -9,6 +10,17 @@ interface VoiceMessage {
   isUser: boolean;
   isAudio?: boolean;
   audioData?: string;
+  receiptData?: any;
+}
+
+interface ReceiptData {
+  merchant: string;
+  amount: number;
+  date: string;
+  category: string;
+  description: string;
+  items: string[];
+  confidence: string;
 }
 
 const WS_URL = `ws://${window.location.hostname}:8000/api/ai/voice/ws/user_123`;
@@ -18,6 +30,7 @@ export default function LiveAIVoiceChat({ onBack }: { onBack: () => void }) {
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [transcript, setTranscript] = useState('');
+  const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null);
   
   const ws = useRef<WebSocket | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -49,6 +62,56 @@ export default function LiveAIVoiceChat({ onBack }: { onBack: () => void }) {
     }
     return bytes.buffer;
   }
+
+  // Receipt handling functions
+  const handleReceiptProcessed = (receiptData: ReceiptData) => {
+    console.log('LiveAIVoiceChat: Receipt processed:', receiptData);
+    
+    // Store the receipt data
+    setCurrentReceipt(receiptData);
+    
+    // Add user message showing receipt was uploaded
+    const userMessage: VoiceMessage = {
+      id: Date.now().toString(),
+      text: `Receipt uploaded: ${receiptData.merchant} - $${receiptData.amount.toFixed(2)}`,
+      isUser: true,
+      receiptData,
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    
+    // Send receipt context to AI via WebSocket
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      const receiptContext = `I've received a receipt with the following details:
+Merchant: ${receiptData.merchant}
+Amount: $${receiptData.amount.toFixed(2)}
+Date: ${receiptData.date}
+Category: ${receiptData.category}
+Description: ${receiptData.description}
+Items: ${receiptData.items.join(', ')}
+Confidence: ${receiptData.confidence}
+
+Please acknowledge that you've received this receipt information and ask if I'd like you to add it as a transaction to my records.`;
+
+      const message = {
+        mime_type: "text/plain",
+        data: receiptContext
+      };
+      
+      ws.current.send(JSON.stringify(message));
+      console.log('LiveAIVoiceChat: Sent receipt context to AI');
+    }
+  };
+
+  const handleReceiptError = (error: string) => {
+    console.error('LiveAIVoiceChat: Receipt error:', error);
+    const errorMessage: VoiceMessage = {
+      id: Date.now().toString(),
+      text: `Receipt processing failed: ${error}`,
+      isUser: false,
+    };
+    setMessages(prev => [...prev, errorMessage]);
+  };
 
   // Play buffered PCM audio chunks
   async function playBufferedAudio() {
@@ -351,23 +414,30 @@ export default function LiveAIVoiceChat({ onBack }: { onBack: () => void }) {
           )}
         </View>
         
-        {connectionStatus === 'connected' && (
-          <TouchableOpacity 
-            onPress={handleManualInterrupt} 
-            style={styles.interruptButton}
-          >
-            <Text style={styles.interruptText}>Stop AI</Text>
-          </TouchableOpacity>
-        )}
-        
-        {connectionStatus === 'disconnected' && (
-          <TouchableOpacity 
-            onPress={connectWebSocket} 
-            style={styles.reconnectButton}
-          >
-            <Text style={styles.reconnectText}>Reconnect</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.actionButtons}>
+          <ReceiptUpload 
+            onReceiptProcessed={handleReceiptProcessed}
+            onError={handleReceiptError}
+          />
+          
+          {connectionStatus === 'connected' && (
+            <TouchableOpacity 
+              onPress={handleManualInterrupt} 
+              style={styles.interruptButton}
+            >
+              <Text style={styles.interruptText}>Stop AI</Text>
+            </TouchableOpacity>
+          )}
+          
+          {connectionStatus === 'disconnected' && (
+            <TouchableOpacity 
+              onPress={connectWebSocket} 
+              style={styles.reconnectButton}
+            >
+              <Text style={styles.reconnectText}>Reconnect</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
       
       {transcript && (
@@ -442,10 +512,13 @@ const styles = StyleSheet.create({
   controls: { 
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.neutral[700],
+    borderTopColor: colors.neutral[700]
+  },
+  actionButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    marginTop: 8,
   },
   statusContainer: {
     flexDirection: 'row',

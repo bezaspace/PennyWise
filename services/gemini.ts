@@ -20,6 +20,27 @@ class GeminiService {
   streamFinancialAdvice(prompt: string): AsyncGenerator<string, void, unknown> {
     return apiService.streamFinancialAdvice(prompt);
   }
+
+  /**
+   * Upload and process a receipt image
+   */
+  async processReceipt(imageUri: string): Promise<{
+    success: boolean;
+    data?: any;
+    error?: string;
+    message: string;
+  }> {
+    try {
+      return await apiService.uploadReceipt(imageUri);
+    } catch (error) {
+      console.error('Error processing receipt:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        message: 'Unable to process receipt at this time. Please try again later.'
+      };
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

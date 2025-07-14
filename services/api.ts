@@ -150,6 +150,41 @@ class ApiService {
     return response.advice;
   }
 
+  async uploadReceipt(imageUri: string): Promise<{
+    success: boolean;
+    data?: any;
+    error?: string;
+    message: string;
+  }> {
+    try {
+      const formData = new FormData();
+      
+      // Create file object from URI
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      
+      formData.append('file', blob, 'receipt.jpg');
+
+      const uploadResponse = await fetch(`${this.apiBaseUrl}/api/ai/receipt/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+
+      return await uploadResponse.json();
+    } catch (error) {
+      console.error('Receipt upload error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        message: 'Failed to upload receipt'
+      };
+    }
+  }
+
   /**
    * Stream financial advice from the AI backend.
    * Returns an async generator yielding text chunks.

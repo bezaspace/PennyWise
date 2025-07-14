@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import LiveAIVoiceChat from '@/components/LiveAIVoiceChat';
+import ReceiptUpload from '@/components/ReceiptUpload';
 import { 
   View, 
   Text, 
@@ -20,6 +21,17 @@ interface Message {
   id: string;
   text: string;
   isUser: boolean;
+  receiptData?: any;
+}
+
+interface ReceiptData {
+  merchant: string;
+  amount: number;
+  date: string;
+  category: string;
+  description: string;
+  items: string[];
+  confidence: string;
 }
 
 export default function AIChatScreen() {
@@ -27,7 +39,7 @@ export default function AIChatScreen() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: "Hello! I'm your AI financial advisor. Ask me anything about personal finance.",
+      text: "Hello! I'm your AI financial advisor. Ask me anything about personal finance, or upload a receipt to automatically extract transaction details.",
       isUser: false,
     }
   ]);
@@ -88,6 +100,54 @@ export default function AIChatScreen() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleReceiptProcessed = (receiptData: ReceiptData) => {
+    // Add user message showing receipt was uploaded
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: `Receipt uploaded: ${receiptData.merchant} - $${receiptData.amount.toFixed(2)}`,
+      isUser: true,
+      receiptData,
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Add AI response with receipt details
+    const aiMessageId = (Date.now() + 1).toString();
+    const receiptSummary = `I've processed your receipt! Here's what I found:
+
+Merchant: ${receiptData.merchant}
+Amount: $${receiptData.amount.toFixed(2)}
+Date: ${receiptData.date}
+Category: ${receiptData.category}
+Description: ${receiptData.description}
+${receiptData.items.length > 0 ? `Items: ${receiptData.items.join(', ')}` : ''}
+Confidence: ${receiptData.confidence}
+
+Would you like me to add this as a transaction to your records? I can also help you modify any of the details if needed.`;
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: aiMessageId,
+        text: receiptSummary,
+        isUser: false,
+        receiptData,
+      },
+    ]);
+
+    setIsLoading(false);
+  };
+
+  const handleReceiptError = (error: string) => {
+    const errorMessage: Message = {
+      id: Date.now().toString(),
+      text: `Receipt processing failed: ${error}`,
+      isUser: false,
+    };
+    setMessages(prev => [...prev, errorMessage]);
   };
 
   if (voiceMode) {
@@ -152,6 +212,10 @@ export default function AIChatScreen() {
 
         <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
+            <ReceiptUpload 
+              onReceiptProcessed={handleReceiptProcessed}
+              onError={handleReceiptError}
+            />
             <TextInput
               style={styles.textInput}
               placeholder="Ask me anything..."
@@ -191,8 +255,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
+    fontSize: 20,
+    fontFamily: 'Inter-Bold',
+    color: colors.neutral[100],
+  },
   voiceToggle: {
-    marginLeft: 12,
+    marginTop: 8,
     backgroundColor: colors.primary[600],
     borderRadius: 16,
     paddingHorizontal: 12,
@@ -202,10 +270,6 @@ const styles = StyleSheet.create({
     color: colors.neutral[100],
     fontSize: 14,
     fontWeight: 'bold',
-  },
-    fontSize: 20,
-    fontFamily: 'Inter-Bold',
-    color: colors.neutral[100],
   },
   messagesContainer: {
     flex: 1,
@@ -253,7 +317,7 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     backgroundColor: colors.neutral[800],
     borderRadius: 20,
     paddingHorizontal: 16,
@@ -265,7 +329,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     color: colors.neutral[100],
     maxHeight: 100,
-    marginRight: 12,
+    marginHorizontal: 12,
   },
   sendButton: {
     backgroundColor: colors.primary[600],
