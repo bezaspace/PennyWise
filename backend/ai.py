@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv; load_dotenv()
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends, WebSocket
+from fastapi import APIRouter, HTTPException, Depends, WebSocket, UploadFile, File
 from fastapi.responses import StreamingResponse
 import base64
 import asyncio
@@ -17,11 +17,18 @@ import json
 
 from database import get_db
 from adk_services import runner, session_service
+from receipt_service import receipt_service
 
 # --- Pydantic Models ---
 
 class FinancialAdviceRequest(BaseModel):
     prompt: str
+
+class ReceiptUploadResponse(BaseModel):
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    message: str
 
 # --- ADK Agent Setup ---
 
@@ -238,100 +245,167 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
 
 @router.post("/chat/stream")
 async def chat_stream(request: FinancialAdviceRequest):
-    """Stream AI chat response based on user prompt using ADK Agent."""
-    user_id = "user_123"  # In a real app, this would come from auth
-    session_id = f"{user_id}_session"  # A simple way to manage sessions per user
-
-    # Follow the ADK documentation pattern for session management with extra verification
-    session = None
+    """Stream AI chat response using standard Gemini API for text chat."""
+    from google import genai
+    
     try:
-        # First, try to get existing session
-        session = await session_service.get_session(
-            app_name="PennyWise", user_id=user_id, session_id=session_id
-        )
-        logger.info(f"Retrieved existing session: {session_id}")
+        # Initialize Gemini client
+        client = genai.Client()
+        
+        async def event_generator():
+            try:
+                logger.info(f"Using standard Gemini API for text chat: {request.prompt[:50]}...")
+                
+                # Use standard Gemini model for text chat (not live model)
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash-lite-preview-06-17',
+                    contents=[request.prompt]
+                )
+                
+                if response.text:
+                    logger.info(f"Generated response: {response.text[:100]}...")
+                    yield f"data: {response.text}\n\n"
+                else:
+                    yield f"data: I apologize, but I couldn't generate a response. Please try again.\n\n"
+                    
+            except Exception as e:
+                logger.error(f"Error in standard Gemini API: {e}")
+                yield f"data: Error processing request: {str(e)}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/plain")
+        
     except Exception as e:
-        logger.info(f"Session not found, creating new session: {session_id}. Error: {e}")
+        logger.error(f"Chat stream error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/receipt/upload", response_model=ReceiptUploadResponse)
+async def upload_receipt(file: UploadFile = File(...)):
+    """
+    Upload and process a receipt image to extract transaction details.
+    """
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            return ReceiptUploadResponse(
+                success=False,
+                error="Invalid file type. Please upload an image file.",
+                message="File must be an image (JPEG, PNG, etc.)"
+            )
+        
+        # Read file data
+        image_data = await file.read()
+        
+        # Check file size (limit to 20MB as per Gemini docs)
+        if len(image_data) > 20 * 1024 * 1024:
+            return ReceiptUploadResponse(
+                success=False,
+                error="File too large. Maximum size is 20MB.",
+                message="Please upload a smaller image file."
+            )
+        
+        # Process the receipt
+        receipt_data = await receipt_service.extract_receipt_data(
+            image_data=image_data,
+            mime_type=file.content_type
+        )
+        
+        # Check if processing was successful
+        if "error" in receipt_data:
+            return ReceiptUploadResponse(
+                success=False,
+                error=receipt_data["error"],
+                message="Could not extract receipt information from the image."
+            )
+        
+        return ReceiptUploadResponse(
+            success=True,
+            data=receipt_data,
+            message="Receipt processed successfully! Review the extracted information below."
+        )
+        
+    except Exception as e:
+        logger.error(f"Receipt upload error: {e}")
+        return ReceiptUploadResponse(
+            success=False,
+            error=str(e),
+            message="An error occurred while processing the receipt."
+        )
+
+
+@router.post("/chat/receipt")
+async def chat_with_receipt_data(
+    prompt: str,
+    receipt_data: Dict[str, Any]
+):
+    """
+    Send receipt data to AI chat for transaction creation suggestions.
+    """
+    try:
+        # Format the receipt data for the AI
+        receipt_summary = f"""
+Receipt Information Extracted:
+- Merchant: {receipt_data.get('merchant', 'Unknown')}
+- Amount: ${receipt_data.get('amount', 0):.2f}
+- Date: {receipt_data.get('date', 'Unknown')}
+- Category: {receipt_data.get('category', 'miscellaneous')}
+- Description: {receipt_data.get('description', 'Receipt purchase')}
+- Items: {', '.join(receipt_data.get('items', []))}
+- Confidence: {receipt_data.get('confidence', 'medium')}
+
+User Request: {prompt}
+
+Please help the user with this receipt data. If they want to add this as a transaction, you can use the add_transaction tool with the extracted information.
+"""
+        
+        # Use the existing chat stream functionality
+        user_id = "user_123"
+        session_id = f"{user_id}_session"
+        
+        # Get or create session
         try:
-            # Create new session following the documentation pattern
+            session = await session_service.get_session(
+                app_name="PennyWise", user_id=user_id, session_id=session_id
+            )
+        except Exception:
             session = await session_service.create_session(
                 app_name="PennyWise", user_id=user_id, session_id=session_id
             )
-            logger.info(f"Created new session: {session_id}")
-            
-            # Wait a moment and verify the session was created
-            import asyncio
-            await asyncio.sleep(0.1)
-            
-            # Verify session exists
-            verify_session = await session_service.get_session(
-                app_name="PennyWise", user_id=user_id, session_id=session_id
-            )
-            logger.info(f"Session verified: {session_id}")
-            
-        except Exception as create_error:
-            logger.error(f"Failed to create session: {create_error}")
-            # Try one more time to get it in case there's a race condition
+        
+        # Create user message with receipt context
+        user_message = types.Content(role='user', parts=[types.Part(text=receipt_summary)])
+        
+        # Stream the response
+        async def event_generator():
             try:
-                session = await session_service.get_session(
-                    app_name="PennyWise", user_id=user_id, session_id=session_id
-                )
-                logger.info(f"Session found on retry: {session_id}")
-            except:
-                raise HTTPException(status_code=500, detail=f"Session management error: {str(create_error)}")
-
-    async def event_generator():
-        try:
-            # Create user message content following the documentation pattern
-            user_message = types.Content(role='user', parts=[types.Part(text=request.prompt)])
-            
-            logger.info(f"About to call runner.run_async with session_id: {session_id}")
-            
-            # Use runner.run_async exactly as shown in the documentation
-            response_found = False
-            async for event in runner.run_async(
-                user_id=user_id, session_id=session_id, new_message=user_message
-            ):
-                logger.debug(f"Received event: {event.author}, type: {type(event).__name__}")
-                
-                # Check if this is the final response event - using both methods from documentation
-                is_final = False
-                if hasattr(event, 'is_final_response'):
-                    is_final = event.is_final_response()
-                    logger.debug(f"Event is_final_response: {is_final}")
-                
-                if is_final:
-                    logger.info("Processing final response event")
-                    if event.content and event.content.parts:
-                        # Extract text from the first part
-                        text = event.content.parts[0].text
-                        if text:
-                            logger.info(f"Yielding final response: {text[:100]}...")
-                            yield f"data: {text}\n\n"
-                            response_found = True
-                    elif hasattr(event, 'actions') and event.actions and hasattr(event.actions, 'escalate') and event.actions.escalate:
-                        # Handle escalation/error case
-                        error_msg = getattr(event, 'error_message', None) or "Agent encountered an error"
-                        yield f"data: {error_msg}\n\n"
-                        response_found = True
-                    break  # Stop after final response
-                else:
-                    # For intermediate events, check if there's useful content to stream
-                    if event.content and event.content.parts:
-                        text = event.content.parts[0].text
-                        if text and len(text.strip()) > 0:
-                            logger.debug(f"Intermediate content: {text[:50]}...")
-                            # Don't yield intermediate content for now, just log it
-            
-            if not response_found:
-                logger.warning("No final response found in events")
-                yield f"data: No response received from agent.\n\n"
+                response_found = False
+                async for event in runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=user_message
+                ):
+                    is_final = False
+                    if hasattr(event, 'is_final_response'):
+                        is_final = event.is_final_response()
                     
-        except Exception as e:
-            logger.error(f"Error in event generator: {e}")
-            yield f"data: Error processing request: {str(e)}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/plain")
+                    if is_final:
+                        if event.content and event.content.parts:
+                            text = event.content.parts[0].text
+                            if text:
+                                yield f"data: {text}\n\n"
+                                response_found = True
+                        break
+                
+                if not response_found:
+                    yield f"data: I've received the receipt information. Would you like me to add this as a transaction to your records?\n\n"
+                        
+            except Exception as e:
+                logger.error(f"Error in receipt chat: {e}")
+                yield f"data: Error processing receipt chat: {str(e)}\n\n"
+        
+        return StreamingResponse(event_generator(), media_type="text/plain")
+        
+    except Exception as e:
+        logger.error(f"Receipt chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/session/init")

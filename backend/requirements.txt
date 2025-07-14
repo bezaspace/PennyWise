@@ -6,3 +6,4 @@ python-multipart==0.0.20
 python-dotenv==1.0.0
 google-genai==1.25.0
 google-adk==1.6.1
+pillow==10.0.0
