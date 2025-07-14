@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import LiveAIVoiceChat from '@/components/LiveAIVoiceChat';
 import ReceiptUpload from '@/components/ReceiptUpload';
+import { ChatDataWidget } from '@/components/ChatDataWidget';
+import { parseAIResponseForToolData } from '@/utils/aiResponseParser';
 import { 
   View, 
   Text, 
@@ -22,6 +24,10 @@ interface Message {
   text: string;
   isUser: boolean;
   receiptData?: any;
+  toolData?: {
+    type: 'transactions' | 'budgets' | 'goals';
+    data: any[];
+  };
 }
 
 interface ReceiptData {
@@ -81,6 +87,24 @@ export default function AIChatScreen() {
           prev.map(msg =>
             msg.id === aiMessageId
               ? { ...msg, text: aiMessageText }
+              : msg
+          )
+        );
+      }
+
+      // After streaming is complete, parse for tool data
+      const toolData = parseAIResponseForToolData(aiMessageText);
+      if (toolData.hasToolData) {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === aiMessageId
+              ? { 
+                  ...msg, 
+                  toolData: {
+                    type: toolData.type!,
+                    data: toolData.data
+                  }
+                }
               : msg
           )
         );
@@ -195,6 +219,14 @@ Would you like me to add this as a transaction to your records? I can also help 
                 ]}>
                   {message.text}
                 </Text>
+                {message.toolData && (
+                  <View style={styles.toolDataContainer}>
+                    <ChatDataWidget 
+                      type={message.toolData.type}
+                      data={message.toolData.data}
+                    />
+                  </View>
+                )}
               </View>
             </View>
           ))}
@@ -308,6 +340,10 @@ const styles = StyleSheet.create({
   },
   aiMessageText: {
     color: colors.neutral[200],
+  },
+  toolDataContainer: {
+    marginTop: 12,
+    width: '100%',
   },
   inputContainer: {
     paddingHorizontal: 16,

@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import os
 from dotenv import load_dotenv; load_dotenv()
 from typing import List, Dict, Any, Optional
@@ -13,10 +14,12 @@ from pydantic import BaseModel
 from google.adk.events import Event
 from google.adk.agents.run_config import RunConfig
 from google.adk.agents import LiveRequestQueue
+
 import json
 
 from database import get_db
-from adk_services import runner, session_service
+from adk_services import runner, runner_text, session_service
+from tools import set_websocket_for_tools, clear_websocket_for_tools, send_pending_tool_messages
 from receipt_service import receipt_service
 
 # --- Pydantic Models ---
@@ -45,6 +48,9 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for live AI voice chat (bidirectional audio/text)."""
     await websocket.accept()
     logger.info(f"Voice chat WebSocket connected for user: {user_id}")
+    
+    # Set the WebSocket for tools to use
+    set_websocket_for_tools(websocket)
     
     session_id = f"{user_id}_session"
     
@@ -98,6 +104,51 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
     async def agent_to_client():
         try:
             async for event in live_events:
+                # Check for and send any pending tool messages first
+                await send_pending_tool_messages()
+                
+                # Add comprehensive logging to debug event structure
+                logger.info(f"=== NEW EVENT ===")
+                logger.info(f"Event type: {type(event)}")
+                logger.info(f"Event attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
+                
+                # Check for function calls and responses using all possible methods
+                function_calls = []
+                function_responses = []
+                
+                # Method 1: Direct ADK methods
+                if hasattr(event, 'get_function_calls'):
+                    try:
+                        function_calls = event.get_function_calls()
+                        logger.info(f"ADK get_function_calls() returned: {len(function_calls)} calls")
+                    except Exception as e:
+                        logger.info(f"ADK get_function_calls() failed: {e}")
+                
+                if hasattr(event, 'get_function_responses'):
+                    try:
+                        function_responses = event.get_function_responses()
+                        logger.info(f"ADK get_function_responses() returned: {len(function_responses)} responses")
+                    except Exception as e:
+                        logger.info(f"ADK get_function_responses() failed: {e}")
+                
+                # Method 2: Check content.parts for function calls/responses
+                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                    logger.info(f"Event has content with {len(event.content.parts)} parts")
+                    for i, part in enumerate(event.content.parts):
+                        logger.info(f"Part {i}: {type(part)}")
+                        part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
+                        logger.info(f"Part {i} attributes: {part_attrs}")
+                        
+                        # Check for function call in part
+                        if hasattr(part, 'function_call') and part.function_call:
+                            logger.info(f"Found function_call in part {i}: {part.function_call}")
+                            function_calls.append(part.function_call)
+                        
+                        # Check for function response in part
+                        if hasattr(part, 'function_response') and part.function_response:
+                            logger.info(f"Found function_response in part {i}: {part.function_response}")
+                            function_responses.append(part.function_response)
+                
                 # Handle turn complete/interrupted with immediate response
                 if getattr(event, "turn_complete", False):
                     logger.info("AI turn completed")
@@ -117,35 +168,83 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                     await websocket.send_text(json.dumps(message))
                     continue
 
-                part = event.content.parts[0] if event.content and event.content.parts else None
-                if not part:
-                    continue
-                    
-                # Audio response - prioritize for immediate playback
-                if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
-                    audio_data = part.inline_data.data
-                    if audio_data:
-                        logger.debug(f"Sending audio response: {len(audio_data)} bytes")
+                # Handle function calls
+                if function_calls:
+                    logger.info(f"Processing {len(function_calls)} function calls")
+                    for call in function_calls:
+                        logger.info(f"Function call object: {call}")
+                        logger.info(f"Function call attributes: {[attr for attr in dir(call) if not attr.startswith('_')]}")
+                        
+                        tool_name = getattr(call, 'name', 'unknown')
+                        tool_args = getattr(call, 'args', {})
+                        tool_id = getattr(call, 'id', None)
+                        
+                        logger.info(f"Tool call - name: {tool_name}, args: {tool_args}, id: {tool_id}")
+                        
                         message = {
-                            "mime_type": "audio/pcm",
-                            "data": base64.b64encode(audio_data).decode("ascii")
+                            "mime_type": "tool/call",
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "tool_id": tool_id
                         }
                         await websocket.send_text(json.dumps(message))
-                    continue
-                    
-                # Text response (for live transcript during generation)
-                if getattr(part, "text", None):
-                    # Only send partial text if it's meaningful
-                    text_content = part.text.strip()
-                    if text_content and len(text_content) > 2:
+                
+                # Handle function responses
+                if function_responses:
+                    logger.info(f"Processing {len(function_responses)} function responses")
+                    for response in function_responses:
+                        logger.info(f"Function response object: {response}")
+                        logger.info(f"Function response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+                        
+                        tool_name = getattr(response, 'name', 'unknown')
+                        tool_response = getattr(response, 'response', {})
+                        tool_id = getattr(response, 'id', None)
+                        
+                        logger.info(f"Tool response - name: {tool_name}, response: {tool_response}, id: {tool_id}")
+                        
                         message = {
-                            "mime_type": "text/plain",
-                            "data": text_content,
-                            "partial": getattr(event, "partial", False)
+                            "mime_type": "tool/response",
+                            "tool_name": tool_name,
+                            "tool_response": tool_response,
+                            "tool_id": tool_id
                         }
                         await websocket.send_text(json.dumps(message))
+
+                # Handle regular content
+                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts') and event.content.parts:
+                    part = event.content.parts[0]
+                    
+                    # Audio response - prioritize for immediate playback
+                    if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
+                        audio_data = part.inline_data.data
+                        if audio_data:
+                            logger.debug(f"Sending audio response: {len(audio_data)} bytes")
+                            message = {
+                                "mime_type": "audio/pcm",
+                                "data": base64.b64encode(audio_data).decode("ascii")
+                            }
+                            await websocket.send_text(json.dumps(message))
+                        continue
+                        
+                    # Text response (for live transcript during generation)
+                    if getattr(part, "text", None):
+                        # Only send partial text if it's meaningful
+                        text_content = part.text.strip()
+                        if text_content and len(text_content) > 2:
+                            logger.info(f"Sending text response: {text_content[:100]}...")
+                            message = {
+                                "mime_type": "text/plain",
+                                "data": text_content,
+                                "partial": getattr(event, "partial", False)
+                            }
+                            await websocket.send_text(json.dumps(message))
+                
+                logger.info(f"=== END EVENT ===")
+                
         except Exception as e:
             logger.error(f"Error in agent_to_client: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             # Send error message to client
             error_message = {
                 "error": True,
@@ -170,7 +269,8 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                         if hasattr(live_request_queue, "cancel"):
                             live_request_queue.cancel()
                         # Send activity end to flush any pending audio
-                        live_request_queue.send_realtime(activity_end=True)
+                        # Note: activity_end parameter removed in newer ADK versions
+                        live_request_queue.send_realtime()
                         logger.info("Successfully processed interrupt")
                     except Exception as e:
                         logger.warning(f"Error during interrupt: {e}")
@@ -232,6 +332,8 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
         logger.error(f"WebSocket connection error: {e}")
     finally:
         # Clean up resources
+        clear_websocket_for_tools()  # Clear the WebSocket reference
+        
         try:
             live_request_queue.close()
         except Exception as e:
@@ -243,37 +345,84 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
         except Exception as e:
             logger.warning(f"Error closing websocket: {e}")
 
+
+# --- ADK-powered Text Chat Endpoint ---
 @router.post("/chat/stream")
 async def chat_stream(request: FinancialAdviceRequest):
-    """Stream AI chat response using standard Gemini API for text chat."""
-    from google import genai
-    
+    """Stream AI chat response using ADK runner (Flash 2.5 Lite) for text chat with tools."""
     try:
-        # Initialize Gemini client
-        client = genai.Client()
-        
+        # Create a new session for this chat (stateless for now, can be extended)
+        session = await session_service.create_session(app_name="PennyWise", user_id="text_user")
+        session_id = session["id"] if isinstance(session, dict) and "id" in session else session.id if hasattr(session, "id") else "text_session"
+
+
+        # Prepare ADK message structure as an object with .parts and .text attributes
+        new_message = SimpleNamespace(
+            role="user",
+            parts=[SimpleNamespace(text=request.prompt)]
+        )
+
+        # Run the agent with the prompt using the text runner (ADK expects these args)
+        events = runner_text.run(
+            user_id="text_user",
+            session_id=session_id,
+            new_message=new_message,
+        )
+
         async def event_generator():
             try:
-                logger.info(f"Using standard Gemini API for text chat: {request.prompt[:50]}...")
+                accumulated_text = ""
                 
-                # Use standard Gemini model for text chat (not live model)
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash-lite-preview-06-17',
-                    contents=[request.prompt]
-                )
-                
-                if response.text:
-                    logger.info(f"Generated response: {response.text[:100]}...")
-                    yield f"data: {response.text}\n\n"
-                else:
-                    yield f"data: I apologize, but I couldn't generate a response. Please try again.\n\n"
+                for event in events:
+                    # Handle partial streaming events for real-time response
+                    if hasattr(event, 'partial') and event.partial:
+                        if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts') and event.content.parts:
+                            part = event.content.parts[0]
+                            if hasattr(part, 'text') and part.text:
+                                # For streaming, yield incremental text
+                                new_text = part.text
+                                if new_text != accumulated_text:
+                                    if accumulated_text and new_text.startswith(accumulated_text):
+                                        # Yield only the new part
+                                        yield new_text[len(accumulated_text):]
+                                    else:
+                                        # Yield the full new text
+                                        yield new_text
+                                    accumulated_text = new_text
                     
+                    # Handle final response event - this is the complete response
+                    elif hasattr(event, 'is_final_response') and event.is_final_response():
+                        if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts') and event.content.parts:
+                            part = event.content.parts[0]
+                            if hasattr(part, 'text') and part.text:
+                                final_text = part.text
+                                # If we were streaming and this is the final complete response
+                                if accumulated_text and final_text != accumulated_text:
+                                    if final_text.startswith(accumulated_text):
+                                        # Yield any remaining part
+                                        remaining = final_text[len(accumulated_text):]
+                                        if remaining:
+                                            yield remaining
+                                    else:
+                                        # Yield the complete final response
+                                        yield final_text
+                                elif not accumulated_text:
+                                    # No streaming occurred, yield the final response
+                                    yield final_text
+                                break  # Stop processing after final response
+                        
+                        # Handle escalation or error cases
+                        elif hasattr(event, 'actions') and event.actions and hasattr(event.actions, 'escalate') and event.actions.escalate:
+                            error_msg = getattr(event, 'error_message', 'No specific error message.')
+                            yield f"I encountered an issue: {error_msg}"
+                            break
+                            
             except Exception as e:
-                logger.error(f"Error in standard Gemini API: {e}")
-                yield f"data: Error processing request: {str(e)}\n\n"
+                logger.error(f"Error in ADK text chat event processing: {e}")
+                yield f"I apologize, but I encountered an error processing your request. Please try again."
 
         return StreamingResponse(event_generator(), media_type="text/plain")
-        
+
     except Exception as e:
         logger.error(f"Chat stream error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
