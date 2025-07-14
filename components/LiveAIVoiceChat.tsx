@@ -3,14 +3,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { colors } from '@/constants/colors';
 import ReceiptUpload from './ReceiptUpload';
+import { ChatDataWidget } from './ChatDataWidget';
+import { parseAIResponseForToolData, parseToolResponse } from '@/utils/aiResponseParser';
 
 interface VoiceMessage {
   id: string;
   text?: string;
   isUser: boolean;
-  isAudio?: boolean;
-  audioData?: string;
   receiptData?: any;
+  toolData?: {
+    type: 'transactions' | 'budgets' | 'goals';
+    data: any[];
+  };
 }
 
 interface ReceiptData {
@@ -294,19 +298,53 @@ Please acknowledge that you've received this receipt information and ask if I'd 
         if (msg.mime_type === 'audio/pcm' && msg.data) {
           audioChunkBuffer.current.push(msg.data);
           playBufferedAudio();
-          setMessages(prev => [...prev, { 
-            id: Date.now().toString(), 
-            isUser: false, 
-            isAudio: true, 
-            audioData: msg.data 
-          }]);
+          // Don't add audio messages to the chat - just play them
+        } else if (msg.mime_type === 'tool/call' && msg.tool_name) {
+          // Handle tool call - show that AI is using a tool
+          console.log(`AI is calling tool: ${msg.tool_name}`);
+          const toolMessage: VoiceMessage = {
+            id: Date.now().toString(),
+            isUser: false,
+            text: `🔧 Using ${msg.tool_name} tool...`
+          };
+          setMessages(prev => [...prev, toolMessage]);
+        } else if (msg.mime_type === 'tool/response' && msg.tool_name && msg.tool_response) {
+          // Handle tool response - show the data as widgets
+          console.log(`Tool ${msg.tool_name} responded with:`, msg.tool_response);
+          
+          const toolData = parseToolResponse(msg.tool_name, msg.tool_response);            if (toolData.hasToolData) {
+              const toolResponseMessage: VoiceMessage = {
+                id: Date.now().toString(),
+                isUser: false,
+                text: `📊 Here's your ${msg.tool_name.replace('get_', '').replace('_', ' ')} data:`,
+                toolData: {
+                  type: toolData.type!,
+                  data: toolData.data
+                }
+              };
+            setMessages(prev => [...prev, toolResponseMessage]);
+          }
         } else if (msg.mime_type === 'text/plain' && msg.data) {
           setTranscript(msg.data);
-          setMessages(prev => [...prev, { 
+          
+          // For final responses, we still parse for tool data as backup
+          const toolData = parseAIResponseForToolData(msg.data);
+          
+          const newMessage: VoiceMessage = { 
             id: Date.now().toString(), 
             isUser: false, 
-            text: msg.data 
-          }]);
+            text: msg.data
+          };
+
+          // Add tool data if detected (backup method)
+          if (toolData.hasToolData) {
+            newMessage.toolData = {
+              type: toolData.type!,
+              data: toolData.data
+            };
+          }
+
+          setMessages(prev => [...prev, newMessage]);
         } else if (msg.interrupted) {
           console.log('AI interrupted');
           // Handle AI interruption
@@ -392,10 +430,16 @@ Please acknowledge that you've received this receipt information and ask if I'd 
       >
         {messages.map((msg) => (
           <View key={msg.id} style={[styles.messageContainer, msg.isUser ? styles.userMessage : styles.aiMessage]}>
-            {msg.isAudio ? (
-              <Text style={styles.audioText}>🔊 AI Voice Response</Text>
-            ) : (
+            {msg.text && (
               <Text style={styles.messageText}>{msg.text}</Text>
+            )}
+            {msg.toolData && (
+              <View style={styles.toolDataContainer}>
+                <ChatDataWidget 
+                  type={msg.toolData.type}
+                  data={msg.toolData.data}
+                />
+              </View>
             )}
           </View>
         ))}
@@ -501,13 +545,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     maxWidth: '80%'
   },
-  audioText: { 
-    color: colors.primary[600], 
-    fontSize: 16,
-    backgroundColor: colors.neutral[800],
-    padding: 12,
-    borderRadius: 12,
-    fontStyle: 'italic'
+  toolDataContainer: {
+    marginTop: 8,
+    width: '100%',
   },
   controls: { 
     padding: 16,

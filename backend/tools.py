@@ -4,6 +4,51 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TransactionDB, BudgetDB, GoalDB, TransactionType
 from typing import List, Dict, Any, Optional
+import asyncio
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Global variable to store WebSocket connection for tool responses
+_current_websocket = None
+_pending_tool_messages = []
+
+def set_websocket_for_tools(websocket):
+    """Set the current WebSocket connection for tools to use"""
+    global _current_websocket, _pending_tool_messages
+    _current_websocket = websocket
+    _pending_tool_messages = []
+
+def clear_websocket_for_tools():
+    """Clear the WebSocket connection"""
+    global _current_websocket, _pending_tool_messages
+    _current_websocket = None
+    _pending_tool_messages = []
+
+def queue_tool_response(tool_name: str, tool_data: Any):
+    """Queue a tool response to be sent via WebSocket"""
+    global _pending_tool_messages
+    message = {
+        "mime_type": "tool/response",
+        "tool_name": tool_name,
+        "tool_response": tool_data,
+        "tool_id": None
+    }
+    _pending_tool_messages.append(message)
+    logger.info(f"Queued tool response for {tool_name}: {len(tool_data) if isinstance(tool_data, list) else 'single item'}")
+
+async def send_pending_tool_messages():
+    """Send all pending tool messages"""
+    global _current_websocket, _pending_tool_messages
+    if _current_websocket and _pending_tool_messages:
+        for message in _pending_tool_messages:
+            try:
+                await _current_websocket.send_text(json.dumps(message))
+                logger.info(f"Sent tool response for {message['tool_name']}")
+            except Exception as e:
+                logger.error(f"Failed to send tool response: {e}")
+        _pending_tool_messages = []
 
 def add_transaction(
     user_id: str,
@@ -76,8 +121,9 @@ def get_transactions(user_id: str) -> List[Dict[str, Any]]:
     db = next(db_gen)
     try:
         transactions = db.query(TransactionDB).order_by(TransactionDB.date.desc()).limit(5).all()
-        return [
+        result = [
             {
+                "id": t.id,
                 "description": t.description,
                 "amount": t.amount,
                 "category": t.category,
@@ -86,6 +132,11 @@ def get_transactions(user_id: str) -> List[Dict[str, Any]]:
             }
             for t in transactions
         ]
+        
+        # Queue tool response for WebSocket sending
+        queue_tool_response("get_transactions", result)
+        
+        return result
     finally:
         next(db_gen, None)
 
@@ -101,8 +152,9 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
     db = next(db_gen)
     try:
         budgets = db.query(BudgetDB).all()
-        return [
+        result = [
             {
+                "id": b.id,
                 "category": b.category,
                 "limit": b.limit,
                 "spent": b.spent,
@@ -110,6 +162,11 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
             }
             for b in budgets
         ]
+        
+        # Queue tool response for WebSocket sending
+        queue_tool_response("get_budgets", result)
+        
+        return result
     finally:
         next(db_gen, None)
 
@@ -125,8 +182,9 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
     db = next(db_gen)
     try:
         goals = db.query(GoalDB).all()
-        return [
+        result = [
             {
+                "id": g.id,
                 "title": g.title,
                 "target_amount": g.target_amount,
                 "current_amount": g.current_amount,
@@ -135,5 +193,10 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
             }
             for g in goals
         ]
+        
+        # Queue tool response for WebSocket sending
+        queue_tool_response("get_goals", result)
+        
+        return result
     finally:
         next(db_gen, None)
