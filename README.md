@@ -1,3 +1,13 @@
+# Minimal Categories & Budgets Workflow
+
+You can now create a category (just a name) and assign a budget amount to it. The interface is minimal:
+
+- Create a category by entering a name.
+- Assign a budget amount to any category.
+- The UI displays a list of categories and their assigned budgets.
+- No category types, icons, colors, or budget periods.
+
+Editing and deleting categories and budgets is supported, but only the name and amount are used.
 # PennyWise - Personal Finance App
 
 A modern personal finance tracking app built with React Native (Expo) frontend and FastAPI backend.

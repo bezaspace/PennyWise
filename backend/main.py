@@ -9,12 +9,13 @@ from dotenv import load_dotenv
 
 from database import get_db, create_tables, seed_database, engine
 from models import (
-    TransactionDB, BudgetDB, GoalDB,
+    TransactionDB, BudgetDB, GoalDB, CategoryDB,
     Transaction, TransactionCreate,
     Budget, BudgetCreate, BudgetUpdate,
     Goal, GoalCreate, GoalUpdate,
+    Category, CategoryCreate, CategoryUpdate,
     AnalyticsBalance, AnalyticsIncome, AnalyticsExpenses, AnalyticsSpending,
-    TransactionType
+    TransactionType, CategoryType
 )
 from ai import router as ai_router
 from adk_services import initialize_adk_services
@@ -132,7 +133,7 @@ def get_budgets(db: Session = Depends(get_db)):
             category=b.category,
             limit=b.limit,
             spent=b.spent,
-            period=b.period.value  # Convert enum to string
+            period=b.period
         ))
     return result
 
@@ -159,7 +160,7 @@ def create_budget(budget: BudgetCreate, db: Session = Depends(get_db)):
         category=db_budget.category,
         limit=db_budget.limit,
         spent=db_budget.spent,
-        period=db_budget.period.value
+        period=db_budget.period
     )
 
 @app.put("/api/budgets/{budget_id}", response_model=Budget)
@@ -180,8 +181,7 @@ def update_budget(budget_id: str, budget_update: BudgetUpdate, db: Session = Dep
         id=budget.id,
         category=budget.category,
         limit=budget.limit,
-        spent=budget.spent,
-        period=budget.period.value
+        spent=budget.spent
     )
 
 # Goal endpoints
@@ -224,6 +224,74 @@ def update_goal(goal_id: str, goal_update: GoalUpdate, db: Session = Depends(get
     db.refresh(goal)
     
     return goal
+
+# Category endpoints
+@app.get("/api/categories", response_model=List[Category])
+def get_categories(db: Session = Depends(get_db)):
+    categories = db.query(CategoryDB).order_by(CategoryDB.name).all()
+    return [Category.from_orm(category) for category in categories]
+
+@app.post("/api/categories", response_model=Category)
+def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
+    # Check if category name already exists
+    existing = db.query(CategoryDB).filter(CategoryDB.name == category.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Category name already exists")
+    
+    # Generate ID based on timestamp
+    category_id = str(int(datetime.now().timestamp() * 1000))
+    
+    db_category = CategoryDB(
+        id=category_id,
+        name=category.name
+    )
+    
+    db.add(db_category)
+    db.commit()
+    db.refresh(db_category)
+    
+    return db_category
+
+@app.put("/api/categories/{category_id}", response_model=Category)
+def update_category(category_id: str, category_update: CategoryUpdate, db: Session = Depends(get_db)):
+    category = db.query(CategoryDB).filter(CategoryDB.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    # Check if new name conflicts with existing category
+    if category_update.name and category_update.name != category.name:
+        existing = db.query(CategoryDB).filter(CategoryDB.name == category_update.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Category name already exists")
+    
+    update_data = category_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(category, field, value)
+    
+    db.commit()
+    db.refresh(category)
+    
+    return category
+
+@app.delete("/api/categories/{category_id}")
+def delete_category(category_id: str, db: Session = Depends(get_db)):
+    category = db.query(CategoryDB).filter(CategoryDB.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    # Check if category is in use by transactions or budgets
+    transactions_using = db.query(TransactionDB).filter(TransactionDB.category == category.name).first()
+    budgets_using = db.query(BudgetDB).filter(BudgetDB.category == category.name).first()
+    if transactions_using or budgets_using:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete category that is in use by transactions or budgets"
+        )
+    
+    db.delete(category)
+    db.commit()
+    
+    return {"message": "Category deleted successfully"}
 
 # Analytics endpoints
 @app.get("/api/analytics/balance", response_model=AnalyticsBalance)

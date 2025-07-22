@@ -10,58 +10,63 @@ import {
   TextInput,
   Alert
 } from 'react-native';
-import { Plus, TrendingUp, TrendingDown, CircleAlert as AlertCircle } from 'lucide-react-native';
+import { Plus, TrendingUp, TrendingDown, CircleAlert as AlertCircle, Settings } from 'lucide-react-native';
 import { BudgetProgress } from '@/components/BudgetProgress';
+import { CategoryManager } from '@/components/CategoryManager';
+import { CategoryPicker } from '@/components/CategoryPicker';
 import { colors } from '@/constants/colors';
 import { globalStyles } from '@/constants/styles';
 import { apiService, Budget } from '@/services/api';
+import { Goal } from '@/services/api';
+import { GoalCard } from '@/components/GoalCard';
 import { geminiService } from '@/services/gemini';
+import { useCategories } from '@/hooks/useCategories';
 
 export default function BudgetScreen() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [totalBudget, setTotalBudget] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [insights, setInsights] = useState<string>('');
   const [newBudget, setNewBudget] = useState({
     category: '',
     limit: '',
-    period: 'monthly' as 'weekly' | 'monthly',
+    period: 'monthly', // default value, can be changed to 'weekly' if needed
   });
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { categories } = useCategories();
 
   const loadBudgets = async () => {
     try {
-      const allBudgets = await apiService.getBudgets();
+      const [allBudgets, allGoals] = await Promise.all([
+        apiService.getBudgets(),
+        apiService.getGoals()
+      ]);
       setBudgets(allBudgets);
+      setGoals(allGoals);
       
       const total = allBudgets.reduce((sum, b) => sum + b.limit, 0);
       const spent = allBudgets.reduce((sum, b) => sum + b.spent, 0);
       setTotalBudget(total);
       setTotalSpent(spent);
 
-      // Generate AI insights
-      if (allBudgets.length > 0) {
-        const transactions = await apiService.getTransactions();
-        const budgetInsights = await geminiService.generateBudgetInsights(
-          transactions.filter(t => t.type === 'expense')
-        );
-        setInsights(budgetInsights);
-      }
+      // Insights feature removed for minimal interface
     } catch (error) {
       console.error('Error loading budgets:', error);
     }
   };
 
   const addBudget = async () => {
-    if (!newBudget.category || !newBudget.limit) {
+    if (!newBudget.category || !newBudget.limit || !newBudget.period) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
     setIsLoading(true);
     try {
-      const budget: Omit<Budget, 'id' | 'spent'> = {
+      const budget: Omit<Budget, 'id' | 'spent'> & { period: string } = {
         category: newBudget.category,
         limit: parseFloat(newBudget.limit),
         period: newBudget.period,
@@ -91,12 +96,20 @@ export default function BudgetScreen() {
     <SafeAreaView style={globalStyles.safeArea}>
       <View style={styles.header}>
         <Text style={styles.title}>Budget</Text>
-        <TouchableOpacity 
-          style={styles.addButton}
-          onPress={() => setShowAddModal(true)}
-        >
-          <Plus size={24} color={colors.neutral[100]} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => setShowCategoryManager(true)}
+          >
+            <Settings size={20} color={colors.neutral[400]} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.addButton}
+            onPress={() => setShowAddModal(true)}
+          >
+            <Plus size={24} color={colors.neutral[100]} />
+          </TouchableOpacity>
+        </View>
       </View>
       <ScrollView style={globalStyles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.overviewCard}>
@@ -154,6 +167,21 @@ export default function BudgetScreen() {
             </View>
           )}
         </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Savings Goals</Text>
+          {goals.length > 0 ? (
+            goals.map((goal) => (
+              <GoalCard key={goal.id} goal={goal} />
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No savings goals yet</Text>
+              <Text style={styles.emptyStateSubtext}>
+                Add a goal from the Goals tab
+              </Text>
+            </View>
+          )}
+        </View>
         <View style={{ height: 100 }} />
       </ScrollView>
       <Modal
@@ -182,12 +210,11 @@ export default function BudgetScreen() {
           <View style={styles.modalContent}>
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Category</Text>
-              <TextInput
-                style={globalStyles.input}
-                placeholder="e.g., Food & Dining, Shopping, etc."
-                placeholderTextColor={colors.neutral[400]}
-                value={newBudget.category}
-                onChangeText={(text) => setNewBudget({ ...newBudget, category: text })}
+              <CategoryPicker
+                categories={categories}
+                selectedCategory={newBudget.category}
+                onSelectCategory={(category) => setNewBudget({ ...newBudget, category })}
+                placeholder="Select a category"
               />
             </View>
             <View style={styles.inputGroup}>
@@ -201,31 +228,16 @@ export default function BudgetScreen() {
                 keyboardType="numeric"
               />
             </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Period</Text>
-              <View style={styles.periodButtons}>
-                {['weekly', 'monthly'].map((period) => (
-                  <TouchableOpacity
-                    key={period}
-                    style={[
-                      styles.periodButton,
-                      newBudget.period === period && styles.periodButtonActive
-                    ]}
-                    onPress={() => setNewBudget({ ...newBudget, period: period as any })}
-                  >
-                    <Text style={[
-                      styles.periodButtonText,
-                      newBudget.period === period && styles.periodButtonTextActive
-                    ]}>
-                      {period.charAt(0).toUpperCase() + period.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
           </View>
         </SafeAreaView>
       </Modal>
+
+      {/* Category Manager Modal */}
+      <CategoryManager
+        visible={showCategoryManager}
+        onClose={() => setShowCategoryManager(false)}
+        onCategoriesChange={loadBudgets}
+      />
     </SafeAreaView>
   );
 }
@@ -242,6 +254,19 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontFamily: 'Inter-Bold',
     color: colors.neutral[100],
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  settingsButton: {
+    backgroundColor: colors.neutral[700],
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addButton: {
     backgroundColor: colors.primary[600],

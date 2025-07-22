@@ -71,49 +71,15 @@ function containsTransactionData(text: string): boolean {
     'you spent',
     'you purchased',
     'your transactions show',
-    'looking at your transactions',
-    // More aggressive patterns
-    'transactions',
-    'spent',
-    'purchased',
-    'bought',
-    'paid',
-    'coffee',
-    'grocery',
-    'gas',
-    'food',
-    'restaurant',
-    'store',
-    'amazon',
-    'netflix',
-    'subscription',
-    '$', // Any mention of money
-    'amount',
-    'cost',
-    'price',
-    // Date patterns that often accompany transaction discussions
-    'yesterday',
-    'today',
-    'this week',
-    'last week',
-    'this month'
+    'looking at your transactions'
   ];
-  
+
   const lowerText = text.toLowerCase();
-  
-  // If the response contains multiple transaction-related terms, it's likely about transactions
-  const matchCount = indicators.filter(indicator => 
+
+  // Check for explicit transaction-related terms
+  return indicators.some(indicator =>
     lowerText.includes(indicator.toLowerCase())
-  ).length;
-  
-  console.log(`Transaction indicators found: ${matchCount} in text: "${text.substring(0, 100)}..."`);
-  
-  // Lower threshold for detection - if we find 2 or more indicators, show widgets
-  return matchCount >= 2 || 
-         lowerText.includes('transaction') || 
-         lowerText.includes('spent') ||
-         lowerText.includes('purchase') ||
-         (lowerText.includes('$') && (lowerText.includes('recent') || lowerText.includes('last')));
+  ) || lowerText.includes('transaction');
 }
 
 function containsBudgetData(text: string): boolean {
@@ -134,9 +100,9 @@ function containsBudgetData(text: string): boolean {
     'spending plan',
     'budget breakdown'
   ];
-  
+
   const lowerText = text.toLowerCase();
-  return indicators.some(indicator => 
+  return indicators.some(indicator =>
     lowerText.includes(indicator.toLowerCase())
   );
 }
@@ -159,16 +125,16 @@ function containsGoalData(text: string): boolean {
     'savings progress',
     'financial targets'
   ];
-  
+
   const lowerText = text.toLowerCase();
-  return indicators.some(indicator => 
+  return indicators.some(indicator =>
     lowerText.includes(indicator.toLowerCase())
   );
 }
 
 function extractTransactionData(text: string): Transaction[] {
   const transactions: Transaction[] = [];
-  
+
   // Enhanced patterns to extract transaction-like data from AI responses
   const patterns = [
     /\$(\d+\.?\d*)\s+(?:on|for|at)\s+([^,\n]+?)(?:\s+at\s+([^,\n]+?))?(?:\s+on\s+(\d{4}-\d{2}-\d{2}))?/gi,
@@ -181,7 +147,7 @@ function extractTransactionData(text: string): Transaction[] {
     let match;
     while ((match = pattern.exec(text)) !== null) {
       let description, amount, category, date;
-      
+
       // Handle different pattern formats
       if (pattern.source.includes('spent|paid|charged')) {
         amount = parseFloat(match[1]);
@@ -199,7 +165,7 @@ function extractTransactionData(text: string): Transaction[] {
         category = match[3] || 'Other';
         date = match[4] || new Date().toISOString().split('T')[0];
       }
-      
+
       if (!isNaN(amount) && amount > 0) {
         const transaction: Transaction = {
           id: Math.random().toString(36).substr(2, 9),
@@ -209,153 +175,77 @@ function extractTransactionData(text: string): Transaction[] {
           date,
           type: 'expense'
         };
-        
+
         transactions.push(transaction);
       }
     }
   });
 
-  // Enhanced mock data that's more realistic when no structured data found
-  if (transactions.length === 0 && containsTransactionData(text)) {
-    // Create more realistic mock data based on current date
-    const now = new Date();
-    const yesterday = new Date(now.getTime() - 86400000);
-    const twoDaysAgo = new Date(now.getTime() - 2 * 86400000);
-    const threeDaysAgo = new Date(now.getTime() - 3 * 86400000);
-    const fourDaysAgo = new Date(now.getTime() - 4 * 86400000);
 
-    transactions.push(
-      {
-        id: '1',
-        description: 'Starbucks Coffee',
-        amount: -5.47,
-        category: 'Food & Dining',
-        date: now.toISOString().split('T')[0],
-        type: 'expense'
-      },
-      {
-        id: '2',
-        description: 'Whole Foods Market',
-        amount: -89.32,
-        category: 'Food & Dining',
-        date: yesterday.toISOString().split('T')[0],
-        type: 'expense'
-      },
-      {
-        id: '3',
-        description: 'Shell Gas Station',
-        amount: -42.15,
-        category: 'Transportation',
-        date: twoDaysAgo.toISOString().split('T')[0],
-        type: 'expense'
-      },
-      {
-        id: '4',
-        description: 'Netflix Subscription',
-        amount: -15.99,
-        category: 'Entertainment',
-        date: threeDaysAgo.toISOString().split('T')[0],
-        type: 'expense'
-      },
-      {
-        id: '5',
-        description: 'Salary Deposit',
-        amount: 2500.00,
-        category: 'Income',
-        date: fourDaysAgo.toISOString().split('T')[0],
-        type: 'income'
-      }
-    );
-  }
 
   return transactions;
 }
 
 function extractBudgetData(text: string): Budget[] {
   const budgets: Budget[] = [];
-  
-  // Enhanced extraction logic for budgets
-  if (containsBudgetData(text)) {
-    // Create realistic budget data
-    budgets.push(
-      {
-        id: '1',
-        category: 'Food & Dining',
-        limit: 600,
-        spent: 387.52,
-        period: 'monthly'
-      },
-      {
-        id: '2',
-        category: 'Transportation',
-        limit: 250,
-        spent: 156.80,
-        period: 'monthly'
-      },
-      {
-        id: '3',
-        category: 'Entertainment',
-        limit: 200,
-        spent: 95.47,
-        period: 'monthly'
-      },
-      {
-        id: '4',
-        category: 'Shopping',
-        limit: 300,
-        spent: 245.99,
-        period: 'monthly'
-      },
-      {
-        id: '5',
-        category: 'Bills & Utilities',
-        limit: 400,
-        spent: 385.00,
-        period: 'monthly'
+
+  // Try to extract budget data from structured text patterns
+  const budgetPatterns = [
+    /([^:]+):\s*\$(\d+\.?\d*)\s*\/\s*\$(\d+\.?\d*)/gi, // Category: $spent / $limit
+    /([^:]+)\s+budget:\s*\$(\d+\.?\d*)\s+spent:\s*\$(\d+\.?\d*)/gi
+  ];
+
+  budgetPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const category = match[1].trim();
+      const spent = parseFloat(match[2]);
+      const limit = parseFloat(match[3]);
+
+      if (!isNaN(spent) && !isNaN(limit)) {
+        budgets.push({
+          id: Math.random().toString(36).substr(2, 9),
+          category,
+          limit,
+          spent,
+          period: 'monthly'
+        });
       }
-    );
-  }
+    }
+  });
 
   return budgets;
 }
 
 function extractGoalData(text: string): Goal[] {
   const goals: Goal[] = [];
-  
-  // Enhanced extraction logic for goals
-  if (containsGoalData(text)) {
-    const currentDate = new Date();
-    const emergencyDeadline = new Date(currentDate.getTime() + 180 * 86400000);
-    const vacationDeadline = new Date(currentDate.getTime() + 120 * 86400000);
-    const carDeadline = new Date(currentDate.getTime() + 365 * 86400000);
 
-    goals.push(
-      {
-        id: '1',
-        title: 'Emergency Fund',
-        target_amount: 15000,
-        current_amount: 8750,
-        deadline: emergencyDeadline.toISOString().split('T')[0],
-        category: 'Savings'
-      },
-      {
-        id: '2',
-        title: 'Europe Vacation',
-        target_amount: 4500,
-        current_amount: 1850,
-        deadline: vacationDeadline.toISOString().split('T')[0],
-        category: 'Travel'
-      },
-      {
-        id: '3',
-        title: 'New Car Down Payment',
-        target_amount: 8000,
-        current_amount: 2100,
-        deadline: carDeadline.toISOString().split('T')[0],
-        category: 'Transportation'
+  // Try to extract goal data from structured text patterns
+  const goalPatterns = [
+    /([^:]+):\s*\$(\d+\.?\d*)\s*\/\s*\$(\d+\.?\d*)\s+by\s+(\d{4}-\d{2}-\d{2})/gi, // Goal: $current / $target by date
+    /saving\s+for\s+([^:]+):\s*\$(\d+\.?\d*)\s+of\s+\$(\d+\.?\d*)/gi
+  ];
+
+  goalPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const title = match[1].trim();
+      const current_amount = parseFloat(match[2]);
+      const target_amount = parseFloat(match[3]);
+      const deadline = match[4] || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0];
+
+      if (!isNaN(current_amount) && !isNaN(target_amount)) {
+        goals.push({
+          id: Math.random().toString(36).substr(2, 9),
+          title,
+          target_amount,
+          current_amount,
+          deadline,
+          category: 'General'
+        });
       }
-    );
-  }
+    }
+  });
 
   return goals;
 }
@@ -376,7 +266,7 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
   switch (toolName) {
     case 'get_transactions':
       result.type = 'transactions';
-      
+
       // Handle the actual structure returned by the get_transactions tool
       if (Array.isArray(toolData)) {
         // Direct array of transactions
@@ -402,13 +292,13 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
           }));
         }
       }
-      
+
       result.hasToolData = result.data.length > 0;
       break;
-    
+
     case 'get_budgets':
       result.type = 'budgets';
-      
+
       if (Array.isArray(toolData)) {
         result.data = toolData.map((budget, index) => ({
           id: budget.id || index.toString(),
@@ -429,13 +319,13 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
           }));
         }
       }
-      
+
       result.hasToolData = result.data.length > 0;
       break;
-    
+
     case 'get_goals':
       result.type = 'goals';
-      
+
       if (Array.isArray(toolData)) {
         result.data = toolData.map((goal, index) => ({
           id: goal.id || index.toString(),
@@ -458,10 +348,10 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
           }));
         }
       }
-      
+
       result.hasToolData = result.data.length > 0;
       break;
-    
+
     default:
       break;
   }

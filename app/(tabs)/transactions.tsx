@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { Plus, Search, Filter } from 'lucide-react-native';
 import { TransactionItem } from '@/components/TransactionItem';
+import { CategoryPicker } from '@/components/CategoryPicker';
 import { colors } from '@/constants/colors';
 import { globalStyles } from '@/constants/styles';
 import { apiService, Transaction } from '@/services/api';
 import { geminiService } from '@/services/gemini';
+import { useCategories } from '@/hooks/useCategories';
 
 export default function TransactionsScreen() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -29,6 +31,7 @@ export default function TransactionsScreen() {
     category: '',
   });
   const [isLoading, setIsLoading] = useState(false);
+  const { categories } = useCategories();
 
   const loadTransactions = async () => {
     try {
@@ -100,6 +103,41 @@ export default function TransactionsScreen() {
     }
   };
 
+  const deleteTransaction = async (transactionId: string) => {
+    console.log('deleteTransaction called with ID:', transactionId);
+    const transaction = transactions.find(t => t.id === transactionId);
+    console.log('Found transaction:', transaction);
+    if (!transaction) {
+      console.log('Transaction not found, returning early');
+      return;
+    }
+
+    console.log('Showing delete confirmation');
+    
+    // Web-compatible confirmation
+    const confirmed = window.confirm(
+      `Delete Transaction\n\nAre you sure you want to delete "${transaction.description}"?\n\nAmount: $${Math.abs(transaction.amount).toFixed(2)}`
+    );
+    
+    if (confirmed) {
+      console.log('Delete confirmed, calling API...');
+      try {
+        await apiService.deleteTransaction(transactionId);
+        console.log('Delete API call successful');
+        await loadTransactions();
+        console.log('Transactions reloaded');
+        
+        // Web-compatible success message
+        window.alert('Transaction deleted successfully');
+      } catch (error) {
+        console.error('Error deleting transaction:', error);
+        window.alert('Failed to delete transaction. Please try again.');
+      }
+    } else {
+      console.log('Delete cancelled');
+    }
+  };
+
   useEffect(() => {
     loadTransactions();
   }, []);
@@ -165,6 +203,7 @@ export default function TransactionsScreen() {
             <TransactionItem
               key={transaction.id}
               transaction={transaction}
+              onDelete={deleteTransaction}
             />
           ))
         ) : (
@@ -226,12 +265,12 @@ export default function TransactionsScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Category (Optional)</Text>
-              <TextInput
-                style={globalStyles.input}
+              <CategoryPicker
+                categories={categories}
+                selectedCategory={newTransaction.category}
+                onSelectCategory={(category) => setNewTransaction({ ...newTransaction, category })}
                 placeholder="AI will categorize if left empty"
-                placeholderTextColor={colors.neutral[400]}
-                value={newTransaction.category}
-                onChangeText={(text) => setNewTransaction({ ...newTransaction, category: text })}
+                type="both"
               />
             </View>
           </View>

@@ -288,7 +288,8 @@ Please acknowledge that you've received this receipt information and ask if I'd 
       setConnectionStatus('connected');
       setMessages([]);
       startContinuousRecording();
-    };
+    
+  };
     
     ws.current.onmessage = (event) => {
       try {

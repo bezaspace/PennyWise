@@ -14,7 +14,7 @@ export interface Budget {
   category: string;
   limit: number;
   spent: number;
-  period: 'weekly' | 'monthly';
+  period: string;
 }
 
 export interface Goal {
@@ -24,6 +24,11 @@ export interface Goal {
   current_amount: number;
   deadline: string;
   category: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
 }
 
 class ApiService {
@@ -77,7 +82,7 @@ class ApiService {
     return this.apiRequest<Budget[]>('/api/budgets');
   }
 
-  async addBudget(budget: Omit<Budget, 'id' | 'spent'>): Promise<Budget> {
+  async addBudget(budget: Omit<Budget, 'id' | 'spent'> & { period: string }): Promise<Budget> {
     return this.apiRequest<Budget>('/api/budgets', {
       method: 'POST',
       body: JSON.stringify(budget),
@@ -118,6 +123,36 @@ class ApiService {
       console.error('Error updating goal:', error);
       return null;
     }
+  }
+
+  // Categories
+  async getCategories(): Promise<Category[]> {
+    return this.apiRequest<Category[]>('/api/categories');
+  }
+
+  async addCategory(category: Omit<Category, 'id' | 'is_default'>): Promise<Category> {
+    return this.apiRequest<Category>('/api/categories', {
+      method: 'POST',
+      body: JSON.stringify(category),
+    });
+  }
+
+  async updateCategory(id: string, updates: Partial<Category>): Promise<Category | null> {
+    try {
+      return await this.apiRequest<Category>(`/api/categories/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      });
+    } catch (error) {
+      console.error('Error updating category:', error);
+      return null;
+    }
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    await this.apiRequest(`/api/categories/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // Analytics
