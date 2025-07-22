@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base, TransactionDB, BudgetDB, GoalDB, TransactionType, BudgetPeriod
+from models import Base, TransactionDB, BudgetDB, GoalDB, CategoryDB, TransactionType, BudgetPeriod, CategoryType
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
@@ -35,6 +35,89 @@ def seed_database():
         return
     
     try:
+        # Default categories
+        categories = [
+            CategoryDB(
+                id="cat_1",
+                name="Food & Dining",
+                type=CategoryType.expense,
+                icon="Utensils",
+                color="#f59e0b",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_2",
+                name="Shopping",
+                type=CategoryType.expense,
+                icon="ShoppingBag",
+                color="#8b5cf6",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_3",
+                name="Transportation",
+                type=CategoryType.expense,
+                icon="Car",
+                color="#06b6d4",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_4",
+                name="Entertainment",
+                type=CategoryType.expense,
+                icon="Film",
+                color="#f97316",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_5",
+                name="Healthcare",
+                type=CategoryType.expense,
+                icon="Heart",
+                color="#ef4444",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_6",
+                name="Bills & Utilities",
+                type=CategoryType.expense,
+                icon="Receipt",
+                color="#64748b",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_7",
+                name="Income",
+                type=CategoryType.income,
+                icon="TrendingUp",
+                color="#10b981",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_8",
+                name="Savings",
+                type=CategoryType.both,
+                icon="PiggyBank",
+                color="#3b82f6",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_9",
+                name="Travel",
+                type=CategoryType.expense,
+                icon="Plane",
+                color="#ec4899",
+                is_default=1
+            ),
+            CategoryDB(
+                id="cat_10",
+                name="Technology",
+                type=CategoryType.expense,
+                icon="Smartphone",
+                color="#6366f1",
+                is_default=1
+            ),
+        ]
         # Mock transactions (matching the original data)
         transactions = [
             TransactionDB(
@@ -140,6 +223,7 @@ def seed_database():
         ]
         
         # Add all data to database
+        db.add_all(categories)
         db.add_all(transactions)
         db.add_all(budgets)
         db.add_all(goals)

@@ -1,12 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { ShoppingBag, Car, Utensils, Gamepad2, Chrome as Home, Heart, Plane, GraduationCap, DollarSign, MoveHorizontal as MoreHorizontal } from 'lucide-react-native';
+import { ShoppingBag, Car, Utensils, Gamepad2, Chrome as Home, Heart, Plane, GraduationCap, DollarSign, MoveHorizontal as MoreHorizontal, Trash2 } from 'lucide-react-native';
 import { colors } from '@/constants/colors';
 import { Transaction } from '@/services/api';
 
 interface TransactionItemProps {
   transaction: Transaction;
   onPress?: () => void;
+  onDelete?: (transactionId: string) => void;
 }
 
 const categoryIcons: Record<string, any> = {
@@ -35,10 +36,23 @@ const categoryColors: Record<string, string> = {
   'Other': colors.neutral[400],
 };
 
-export function TransactionItem({ transaction, onPress }: TransactionItemProps) {
+export function TransactionItem({ transaction, onPress, onDelete }: TransactionItemProps) {
   const IconComponent = categoryIcons[transaction.category] || MoreHorizontal;
   const iconColor = categoryColors[transaction.category] || colors.neutral[400];
   const isPositive = transaction.amount > 0;
+  
+  const handleDelete = (event?: any) => {
+    console.log('Delete button pressed for transaction:', transaction.id);
+    if (event) {
+      event.stopPropagation(); // Prevent parent TouchableOpacity from firing
+    }
+    if (onDelete) {
+      console.log('Calling onDelete with transaction ID:', transaction.id);
+      onDelete(transaction.id);
+    } else {
+      console.log('onDelete prop is not provided');
+    }
+  };
   
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -64,12 +78,26 @@ export function TransactionItem({ transaction, onPress }: TransactionItemProps) 
         </View>
       </View>
       
-      <Text style={[
-        styles.amount,
-        { color: isPositive ? colors.success[500] : colors.neutral[100] }
-      ]}>
-        {isPositive ? '+' : ''}${Math.abs(transaction.amount).toFixed(2)}
-      </Text>
+      <View style={styles.rightContainer}>
+        <Text style={[
+          styles.amount,
+          { color: isPositive ? colors.success[500] : colors.neutral[100] }
+        ]}>
+          {isPositive ? '+' : ''}${Math.abs(transaction.amount).toFixed(2)}
+        </Text>
+        {onDelete && (
+          <TouchableOpacity 
+            style={styles.deleteButton} 
+            onPress={handleDelete}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            activeOpacity={0.7}
+            onPressIn={() => console.log('Delete button press started')}
+            onPressOut={() => console.log('Delete button press ended')}
+          >
+            <Trash2 size={18} color={colors.error[500]} />
+          </TouchableOpacity>
+        )}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -124,9 +152,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     color: colors.neutral[500],
   },
+  rightContainer: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   amount: {
     fontSize: 16,
     fontFamily: 'Inter-Bold',
     textAlign: 'right',
+    marginBottom: 4,
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: colors.error[500] + '20',
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

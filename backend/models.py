@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Literal, Optional
@@ -16,6 +17,19 @@ class TransactionType(enum.Enum):
 class BudgetPeriod(enum.Enum):
     weekly = "weekly"
     monthly = "monthly"
+
+class CategoryType(enum.Enum):
+    expense = "expense"
+    income = "income"
+    both = "both"
+
+class CategoryDB(Base):
+    __tablename__ = "categories"
+    
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    # Removed type, icon, color, is_default for minimal interface
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class TransactionDB(Base):
     __tablename__ = "transactions"
@@ -35,7 +49,7 @@ class BudgetDB(Base):
     category = Column(String, nullable=False)
     limit = Column(Float, nullable=False)
     spent = Column(Float, default=0.0)
-    period = Column(Enum(BudgetPeriod), nullable=False)
+    period = Column(String(7), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class GoalDB(Base):
@@ -69,7 +83,7 @@ class Transaction(TransactionBase):
 class BudgetBase(BaseModel):
     category: str
     limit: float
-    period: Literal["weekly", "monthly"]
+    period: str
 
 class BudgetCreate(BudgetBase):
     pass
@@ -78,12 +92,11 @@ class BudgetUpdate(BaseModel):
     category: Optional[str] = None
     limit: Optional[float] = None
     spent: Optional[float] = None
-    period: Optional[Literal["weekly", "monthly"]] = None
+    period: Optional[str] = None
 
 class Budget(BudgetBase):
     id: str
     spent: float
-    
     class Config:
         from_attributes = True
 
@@ -122,3 +135,18 @@ class AnalyticsExpenses(BaseModel):
 
 class AnalyticsSpending(BaseModel):
     spending_by_category: dict[str, float]
+
+# Category Pydantic Models
+class CategoryBase(BaseModel):
+    name: str
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+
+class Category(CategoryBase):
+    id: str
+    class Config:
+        from_attributes = True

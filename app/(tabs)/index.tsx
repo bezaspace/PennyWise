@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, RefreshControl, Alert } from 'react-native';
 import { BalanceCard } from '@/components/BalanceCard';
 import { QuickStats } from '@/components/QuickStats';
 import { TransactionItem } from '@/components/TransactionItem';
@@ -49,6 +49,27 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
+  const deleteTransaction = async (transactionId: string) => {
+    const transaction = transactions.find(t => t.id === transactionId);
+    if (!transaction) return;
+
+    // Web-compatible confirmation
+    const confirmed = window.confirm(
+      `Delete Transaction\n\nAre you sure you want to delete "${transaction.description}"?\n\nAmount: $${Math.abs(transaction.amount).toFixed(2)}`
+    );
+    
+    if (confirmed) {
+      try {
+        await apiService.deleteTransaction(transactionId);
+        await loadData(); // Refresh all dashboard data
+        window.alert('Transaction deleted successfully');
+      } catch (error) {
+        console.error('Error deleting transaction:', error);
+        window.alert('Failed to delete transaction. Please try again.');
+      }
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -86,6 +107,7 @@ export default function DashboardScreen() {
             <TransactionItem
               key={transaction.id}
               transaction={transaction}
+              onDelete={deleteTransaction}
             />
           ))}
         </View>
