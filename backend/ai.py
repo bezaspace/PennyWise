@@ -16,7 +16,7 @@ from google.adk.agents.run_config import RunConfig
 from google.adk.agents import LiveRequestQueue
 
 import json
-
+import uuid
 from database import get_db
 from adk_services import runner, runner_text, session_service
 from tools import set_websocket_for_tools, clear_websocket_for_tools, send_pending_tool_messages
@@ -52,25 +52,19 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
     # Set the WebSocket for tools to use
     set_websocket_for_tools(websocket)
     
-    session_id = f"{user_id}_session"
+    # Generate a new unique session ID for each connection
+    session_id = f"session_{uuid.uuid4()}"
     
-    # Ensure session exists
+    # Always create a new session for each voice chat instance
     try:
-        session = await session_service.get_session(
+        session = await session_service.create_session(
             app_name="PennyWise", user_id=user_id, session_id=session_id
         )
-        logger.info(f"Retrieved existing session: {session_id}")
-    except Exception as e:
-        logger.info(f"Creating new session: {session_id}, reason: {e}")
-        try:
-            session = await session_service.create_session(
-                app_name="PennyWise", user_id=user_id, session_id=session_id
-            )
-            logger.info(f"Successfully created new session: {session_id}")
-        except Exception as create_error:
-            logger.error(f"Failed to create session: {create_error}")
-            await websocket.close(code=1011, reason="Session creation failed")
-            return
+        logger.info(f"Successfully created new session: {session_id}")
+    except Exception as create_error:
+        logger.error(f"Failed to create session: {create_error}")
+        await websocket.close(code=1011, reason="Session creation failed")
+        return
 
     # Set up ADK live session for AUDIO modality with optimized VAD
     try:
