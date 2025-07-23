@@ -1,3 +1,5 @@
+from fastapi import FastAPI, Depends, HTTPException, Body
+app = FastAPI(title="PennyWise Finance API", version="1.0.0")
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -22,7 +24,53 @@ from adk_services import initialize_adk_services
 
 load_dotenv()
 
-app = FastAPI(title="PennyWise Finance API", version="1.0.0")
+
+@app.post("/api/budget-category", response_model=Budget)
+def create_category_and_budget(
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    category_name = data.get("category", "").strip()
+    limit = data.get("limit")
+    period = data.get("period", "monthly")
+    if not category_name or limit is None or not period:
+        raise HTTPException(status_code=400, detail="Missing required fields")
+
+    # Check if category exists
+    category = db.query(CategoryDB).filter(CategoryDB.name == category_name).first()
+    if not category:
+        # Create category with default type
+        category_id = str(int(datetime.now().timestamp() * 1000))
+        category = CategoryDB(id=category_id, name=category_name, type="expense")
+        db.add(category)
+        db.commit()
+        db.refresh(category)
+
+    # Check if budget for this category already exists
+    existing_budget = db.query(BudgetDB).filter(BudgetDB.category == category_name, BudgetDB.period == period).first()
+    if existing_budget:
+        raise HTTPException(status_code=400, detail="Budget for this category and period already exists")
+
+    # Create budget
+    budget_id = str(int(datetime.now().timestamp() * 1000))
+    db_budget = BudgetDB(
+        id=budget_id,
+        category=category_name,
+        limit=limit,
+        spent=0.0,
+        period=period
+    )
+    db.add(db_budget)
+    db.commit()
+    db.refresh(db_budget)
+
+    return Budget(
+        id=db_budget.id,
+        category=db_budget.category,
+        limit=db_budget.limit,
+        spent=db_budget.spent,
+        period=db_budget.period
+    )
 
 # Include AI routes
 app.include_router(ai_router)

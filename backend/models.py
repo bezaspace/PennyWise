@@ -28,7 +28,7 @@ class CategoryDB(Base):
     
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False, unique=True)
-    # Removed type, icon, color, is_default for minimal interface
+    type = Column(String, nullable=False, default="expense")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class TransactionDB(Base):

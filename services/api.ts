@@ -32,6 +32,13 @@ export interface Category {
 }
 
 class ApiService {
+  // Create category and budget in one step
+  async addCategoryWithBudget(data: { category: string; limit: number; period: string }): Promise<Budget> {
+    return this.apiRequest<Budget>('/api/budget-category', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
   private apiBaseUrl: string;
 
   constructor() {
