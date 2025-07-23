@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { Plus, TrendingUp, TrendingDown, CircleAlert as AlertCircle, Settings } from 'lucide-react-native';
 import { BudgetProgress } from '@/components/BudgetProgress';
-import { CategoryManager } from '@/components/CategoryManager';
-import { CategoryPicker } from '@/components/CategoryPicker';
 import { colors } from '@/constants/colors';
 import { globalStyles } from '@/constants/styles';
 import { apiService, Budget } from '@/services/api';
@@ -27,7 +25,7 @@ export default function BudgetScreen() {
   const [totalBudget, setTotalBudget] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  // Removed showCategoryManager state
   const [insights, setInsights] = useState<string>('');
   const [newBudget, setNewBudget] = useState({
     category: '',
@@ -36,7 +34,7 @@ export default function BudgetScreen() {
   });
   const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const { categories } = useCategories();
+  // Removed useCategories hook
 
   const loadBudgets = async () => {
     try {
@@ -66,20 +64,18 @@ export default function BudgetScreen() {
 
     setIsLoading(true);
     try {
-      const budget: Omit<Budget, 'id' | 'spent'> & { period: string } = {
-        category: newBudget.category,
+      const data = {
+        category: newBudget.category.trim(),
         limit: parseFloat(newBudget.limit),
         period: newBudget.period,
       };
-
-      await apiService.addBudget(budget);
+      await apiService.addCategoryWithBudget(data);
       await loadBudgets();
-      
       setNewBudget({ category: '', limit: '', period: 'monthly' });
       setShowAddModal(false);
     } catch (error) {
-      console.error('Error adding budget:', error);
-      Alert.alert('Error', 'Failed to add budget. Please try again.');
+      console.error('Error adding category and budget:', error);
+      Alert.alert('Error', 'Failed to add category and budget. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -97,12 +93,6 @@ export default function BudgetScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Budget</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => setShowCategoryManager(true)}
-          >
-            <Settings size={20} color={colors.neutral[400]} />
-          </TouchableOpacity>
           <TouchableOpacity 
             style={styles.addButton}
             onPress={() => setShowAddModal(true)}
@@ -194,12 +184,12 @@ export default function BudgetScreen() {
             <TouchableOpacity onPress={() => setShowAddModal(false)}>
               <Text style={styles.modalCancel}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Add Budget</Text>
+            <Text style={styles.modalTitle}>Add Category & Budget</Text>
             <TouchableOpacity 
               onPress={addBudget}
               disabled={isLoading}
             >
-              <Text style={[
+              <Text style={[ 
                 styles.modalSave,
                 isLoading && { opacity: 0.5 }
               ]}>
@@ -209,12 +199,13 @@ export default function BudgetScreen() {
           </View>
           <View style={styles.modalContent}>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Category</Text>
-              <CategoryPicker
-                categories={categories}
-                selectedCategory={newBudget.category}
-                onSelectCategory={(category) => setNewBudget({ ...newBudget, category })}
-                placeholder="Select a category"
+              <Text style={styles.inputLabel}>Category Name</Text>
+              <TextInput
+                style={globalStyles.input}
+                placeholder="Enter category name"
+                placeholderTextColor={colors.neutral[400]}
+                value={newBudget.category}
+                onChangeText={(text) => setNewBudget({ ...newBudget, category: text })}
               />
             </View>
             <View style={styles.inputGroup}>
@@ -232,12 +223,7 @@ export default function BudgetScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Category Manager Modal */}
-      <CategoryManager
-        visible={showCategoryManager}
-        onClose={() => setShowCategoryManager(false)}
-        onCategoriesChange={loadBudgets}
-      />
+      {/* Removed Category Manager Modal */}
     </SafeAreaView>
   );
 }
