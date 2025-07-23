@@ -193,10 +193,92 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
             }
             for g in goals
         ]
-        
         # Queue tool response for WebSocket sending
         queue_tool_response("get_goals", result)
-        
         return result
+    finally:
+        next(db_gen, None)
+
+def create_goal(goal_data: dict) -> dict:
+    """
+    Creates a new financial goal.
+    Args:
+        goal_data (dict): Data for the new goal.
+    Returns:
+        dict: The created goal.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        goal_id = str(int(datetime.now().timestamp() * 1000))
+        db_goal = GoalDB(
+            id=goal_id,
+            title=goal_data["title"],
+            target_amount=goal_data["target_amount"],
+            current_amount=goal_data.get("current_amount", 0.0),
+            deadline=goal_data["deadline"],
+            category=goal_data["category"]
+        )
+        db.add(db_goal)
+        db.commit()
+        db.refresh(db_goal)
+        return {
+            "id": db_goal.id,
+            "title": db_goal.title,
+            "target_amount": db_goal.target_amount,
+            "current_amount": db_goal.current_amount,
+            "deadline": db_goal.deadline,
+            "category": db_goal.category
+        }
+    finally:
+        next(db_gen, None)
+
+def update_goal(goal_id: str, updates: dict) -> dict:
+    """
+    Updates an existing financial goal.
+    Args:
+        goal_id (str): The ID of the goal to update.
+        updates (dict): Fields to update.
+    Returns:
+        dict: The updated goal.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        goal = db.query(GoalDB).filter(GoalDB.id == goal_id).first()
+        if not goal:
+            raise ValueError("Goal not found")
+        for field, value in updates.items():
+            setattr(goal, field, value)
+        db.commit()
+        db.refresh(goal)
+        return {
+            "id": goal.id,
+            "title": goal.title,
+            "target_amount": goal.target_amount,
+            "current_amount": goal.current_amount,
+            "deadline": goal.deadline,
+            "category": goal.category
+        }
+    finally:
+        next(db_gen, None)
+
+def delete_goal(goal_id: str) -> bool:
+    """
+    Deletes a financial goal.
+    Args:
+        goal_id (str): The ID of the goal to delete.
+    Returns:
+        bool: True if deleted, False otherwise.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        goal = db.query(GoalDB).filter(GoalDB.id == goal_id).first()
+        if not goal:
+            return False
+        db.delete(goal)
+        db.commit()
+        return True
     finally:
         next(db_gen, None)

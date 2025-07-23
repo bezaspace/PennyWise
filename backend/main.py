@@ -273,6 +273,61 @@ def get_goals(db: Session = Depends(get_db)):
         ))
     return result
 
+# Create a new goal
+@app.post("/api/goals", response_model=Goal)
+def create_goal(goal: GoalCreate, db: Session = Depends(get_db)):
+    # Generate ID based on timestamp
+    goal_id = str(int(datetime.now().timestamp() * 1000))
+    db_goal = GoalDB(
+        id=goal_id,
+        title=goal.title,
+        target_amount=goal.target_amount,
+        current_amount=goal.current_amount,
+        deadline=goal.deadline,
+        category=goal.category
+    )
+    db.add(db_goal)
+    db.commit()
+    db.refresh(db_goal)
+    return Goal(
+        id=db_goal.id,
+        title=db_goal.title,
+        target_amount=db_goal.target_amount,
+        current_amount=db_goal.current_amount,
+        deadline=db_goal.deadline,
+        category=db_goal.category
+    )
+
+# Update an existing goal
+@app.put("/api/goals/{goal_id}", response_model=Goal)
+def update_goal(goal_id: str, goal_update: GoalUpdate, db: Session = Depends(get_db)):
+    goal = db.query(GoalDB).filter(GoalDB.id == goal_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    update_data = goal_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(goal, field, value)
+    db.commit()
+    db.refresh(goal)
+    return Goal(
+        id=goal.id,
+        title=goal.title,
+        target_amount=goal.target_amount,
+        current_amount=goal.current_amount,
+        deadline=goal.deadline,
+        category=goal.category
+    )
+
+# Delete a goal
+@app.delete("/api/goals/{goal_id}")
+def delete_goal(goal_id: str, db: Session = Depends(get_db)):
+    goal = db.query(GoalDB).filter(GoalDB.id == goal_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    db.delete(goal)
+    db.commit()
+    return {"message": "Goal deleted successfully"}
+
 # GET endpoint for budget by ID
 @app.get("/api/budgets/{budget_id}", response_model=Budget)
 def get_budget_by_id(budget_id: str, db: Session = Depends(get_db)):

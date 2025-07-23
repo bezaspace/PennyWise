@@ -132,6 +132,18 @@ class ApiService {
     }
   }
 
+  async deleteGoal(id: string): Promise<void> {
+    try {
+      console.log('API: Sending DELETE to /api/goals/' + id);
+      const res = await this.apiRequest(`/api/goals/${id}`, {
+        method: 'DELETE',
+      });
+      console.log('API: Delete response:', res);
+    } catch (error) {
+      console.error('Error deleting goal:', error);
+    }
+  }
+
   // Categories
   async getCategories(): Promise<Category[]> {
     return this.apiRequest<Category[]>('/api/categories');

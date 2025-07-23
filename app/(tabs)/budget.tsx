@@ -72,6 +72,17 @@ export default function BudgetScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newBudget, setNewBudget] = useState({ category: '', limit: '', period: 'monthly' });
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [showDeleteGoalModal, setShowDeleteGoalModal] = useState(false);
+  const [goalToDelete, setGoalToDelete] = useState<Goal | null>(null);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [goalForm, setGoalForm] = useState({
+    title: '',
+    target_amount: '',
+    current_amount: '',
+    deadline: '',
+    category: ''
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [insights, setInsights] = useState<string>('');
   const loadBudgets = async () => {
@@ -87,7 +98,58 @@ export default function BudgetScreen() {
       setTotalBudget(total);
       setTotalSpent(spent);
     } catch (error) {
-      console.error('Error loading budgets:', error);
+      // Optionally log error for development
+      // console.error('Error loading budgets:', error);
+    }
+  };
+
+  const handleAddGoal = () => {
+    setEditingGoal(null);
+    setGoalForm({ title: '', target_amount: '', current_amount: '', deadline: '', category: '' });
+    setShowGoalModal(true);
+  };
+
+  const handleEditGoal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setGoalForm({
+      title: goal.title,
+      target_amount: goal.target_amount.toString(),
+      current_amount: goal.current_amount.toString(),
+      deadline: goal.deadline,
+      category: goal.category
+    });
+    setShowGoalModal(true);
+  };
+
+  const handleDeleteGoal = (goal: Goal) => {
+    setGoalToDelete(goal);
+    setShowDeleteGoalModal(true);
+  };
+
+  const handleSaveGoal = async () => {
+    if (!goalForm.title || !goalForm.target_amount || !goalForm.deadline || !goalForm.category) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+    const goalData = {
+      title: goalForm.title,
+      target_amount: parseFloat(goalForm.target_amount),
+      current_amount: parseFloat(goalForm.current_amount) || 0,
+      deadline: goalForm.deadline,
+      category: goalForm.category
+    };
+    try {
+      if (editingGoal) {
+        await apiService.updateGoal(editingGoal.id, goalData);
+        Alert.alert('Success', 'Goal updated');
+      } else {
+        await apiService.addGoal(goalData);
+        Alert.alert('Success', 'Goal added');
+      }
+      setShowGoalModal(false);
+      await loadBudgets();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save goal');
     }
   };
   useEffect(() => { loadBudgets(); }, []);
@@ -162,16 +224,26 @@ export default function BudgetScreen() {
           )}
         </View>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Savings Goals</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={styles.sectionTitle}>Savings Goals</Text>
+            <TouchableOpacity style={styles.addButton} onPress={handleAddGoal}>
+              <Plus size={20} color={colors.neutral[100]} />
+            </TouchableOpacity>
+          </View>
           {goals.length > 0 ? (
             goals.map((goal) => (
-              <GoalCard key={goal.id} goal={goal} />
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                onEdit={() => handleEditGoal(goal)}
+                onDelete={() => handleDeleteGoal(goal)}
+              />
             ))
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>No savings goals yet</Text>
               <Text style={styles.emptyStateSubtext}>
-                Add a goal from the Goals tab
+                Tap the + button to create your first goal
               </Text>
             </View>
           )}
@@ -179,50 +251,53 @@ export default function BudgetScreen() {
         <View style={{ height: 100 }} />
       </ScrollView>
       <Modal
-        visible={showAddModal}
+        visible={showGoalModal}
         animationType="slide"
         presentationStyle="pageSheet"
       >
         <SafeAreaView style={globalStyles.safeArea}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowAddModal(false)}>
+            <TouchableOpacity onPress={() => setShowGoalModal(false)}>
               <Text style={styles.modalCancel}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Add Category & Budget</Text>
-            <TouchableOpacity 
-              onPress={addBudget}
-              disabled={isLoading}
-            >
-              <Text style={[ 
-                styles.modalSave,
-                isLoading && { opacity: 0.5 }
-              ]}>
-                {isLoading ? 'Adding...' : 'Save'}
-              </Text>
+            <Text style={styles.modalTitle}>{editingGoal ? 'Edit Goal' : 'Add Goal'}</Text>
+            <TouchableOpacity onPress={handleSaveGoal}>
+              <Text style={styles.modalSave}>Save</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.modalContent}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Category Name</Text>
-              <TextInput
-                style={globalStyles.input}
-                placeholder="Enter category name"
-                placeholderTextColor={colors.neutral[400]}
-                value={newBudget.category}
-                onChangeText={(text) => setNewBudget({ ...newBudget, category: text })}
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Budget Limit</Text>
-              <TextInput
-                style={globalStyles.input}
-                placeholder="Enter budget amount"
-                placeholderTextColor={colors.neutral[400]}
-                value={newBudget.limit}
-                onChangeText={(text) => setNewBudget({ ...newBudget, limit: text })}
-                keyboardType="numeric"
-              />
-            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Goal Title"
+              value={goalForm.title}
+              onChangeText={text => setGoalForm(f => ({ ...f, title: text }))}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Target Amount"
+              keyboardType="numeric"
+              value={goalForm.target_amount}
+              onChangeText={text => setGoalForm(f => ({ ...f, target_amount: text }))}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Current Amount"
+              keyboardType="numeric"
+              value={goalForm.current_amount}
+              onChangeText={text => setGoalForm(f => ({ ...f, current_amount: text }))}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Deadline (YYYY-MM-DD)"
+              value={goalForm.deadline}
+              onChangeText={text => setGoalForm(f => ({ ...f, deadline: text }))}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Category"
+              value={goalForm.category}
+              onChangeText={text => setGoalForm(f => ({ ...f, category: text }))}
+            />
           </View>
         </SafeAreaView>
       </Modal>
@@ -271,11 +346,62 @@ export default function BudgetScreen() {
         </SafeAreaView>
       </Modal>
       {/* Removed Category Manager Modal */}
+      {/* Delete Goal Confirmation Modal */}
+      <Modal
+        visible={showDeleteGoalModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowDeleteGoalModal(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#00000080' }}>
+          <View style={{ backgroundColor: colors.neutral[800], padding: 24, borderRadius: 16, width: '80%' }}>
+            <Text style={{ fontSize: 18, color: colors.neutral[100], marginBottom: 16, textAlign: 'center' }}>
+              Delete Goal
+            </Text>
+            <Text style={{ fontSize: 16, color: colors.neutral[300], marginBottom: 24, textAlign: 'center' }}>
+              Are you sure you want to delete "{goalToDelete?.title}"? This action cannot be undone.
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <TouchableOpacity
+                style={{ flex: 1, marginRight: 8, backgroundColor: colors.neutral[700], padding: 12, borderRadius: 8, alignItems: 'center' }}
+                onPress={() => setShowDeleteGoalModal(false)}
+              >
+                <Text style={{ color: colors.neutral[300], fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, marginLeft: 8, backgroundColor: colors.error[500], padding: 12, borderRadius: 8, alignItems: 'center' }}
+                onPress={async () => {
+                  if (!goalToDelete) return;
+                  setShowDeleteGoalModal(false);
+                  try {
+                    await apiService.deleteGoal(goalToDelete.id);
+                    await loadBudgets();
+                    Alert.alert('Success', 'Goal deleted successfully');
+                  } catch (err) {
+                    Alert.alert('Error', 'Failed to delete goal');
+                  }
+                  setGoalToDelete(null);
+                }}
+              >
+                <Text style={{ color: colors.neutral[100], fontSize: 16 }}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  input: {
+    backgroundColor: colors.neutral[700],
+    color: colors.neutral[100],
+    fontSize: 16,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

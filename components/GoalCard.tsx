@@ -7,35 +7,49 @@ import { Goal } from '@/services/api';
 interface GoalCardProps {
   goal: Goal;
   onPress?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-export function GoalCard({ goal, onPress }: GoalCardProps) {
+export function GoalCard({ goal, onPress, onEdit, onDelete }: GoalCardProps) {
   const progress = goal.current_amount / goal.target_amount;
   const daysLeft = Math.max(0, Math.ceil((new Date(goal.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
-  
+
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.iconContainer}>
           <Target size={20} color={colors.accent[500]} />
         </View>
         <Text style={styles.title}>{goal.title}</Text>
+        <View style={styles.actionButtons}>
+          {typeof onEdit === 'function' && (
+            <TouchableOpacity style={styles.actionBtn} onPress={onEdit}>
+              <Text style={{ color: colors.primary[500], fontSize: 14 }}>Edit</Text>
+            </TouchableOpacity>
+          )}
+          {typeof onDelete === 'function' && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => {
+              console.log('Delete button pressed for goal:', goal.id);
+              onDelete && onDelete();
+            }}>
+              <Text style={{ color: colors.error[500], fontSize: 14 }}>Delete</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-      
+
       <View style={styles.progressContainer}>
         <View style={styles.progressBar}>
           <View 
-            style={[
-              styles.progressFill,
-              { width: `${Math.min(progress * 100, 100)}%` }
-            ]} 
+            style={[styles.progressFill, { width: `${Math.min(progress * 100, 100)}%` }]} 
           />
         </View>
         <Text style={styles.percentage}>
           {Math.round(progress * 100)}%
         </Text>
       </View>
-      
+
       <View style={styles.amounts}>
         <Text style={styles.current}>
           ${goal.current_amount.toLocaleString()}
@@ -44,7 +58,7 @@ export function GoalCard({ goal, onPress }: GoalCardProps) {
           of ${goal.target_amount.toLocaleString()}
         </Text>
       </View>
-      
+
       <View style={styles.footer}>
         <View style={styles.meta}>
           <Calendar size={14} color={colors.neutral[400]} />
@@ -57,11 +71,23 @@ export function GoalCard({ goal, onPress }: GoalCardProps) {
           <Text style={styles.category}>{goal.category}</Text>
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 'auto',
+  },
+  actionBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: colors.neutral[700],
+  },
   container: {
     backgroundColor: colors.neutral[800],
     borderRadius: 16,
