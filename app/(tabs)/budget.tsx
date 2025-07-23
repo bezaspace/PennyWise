@@ -1,3 +1,4 @@
+// ...existing code...
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -21,21 +22,58 @@ import { geminiService } from '@/services/gemini';
 import { useCategories } from '@/hooks/useCategories';
 
 export default function BudgetScreen() {
+  const { categories } = useCategories();
+  const handleDeleteBudgetCategory = async (budget: Budget) => {
+    // Find the category ID by matching the budget's category name
+    const categoryObj = categories.find(cat => cat.name === budget.category);
+    if (!categoryObj) {
+      Alert.alert('Error', 'Category not found in category list.');
+      return;
+    }
+    try {
+      await apiService.deleteCategory(categoryObj.id);
+      await loadBudgets();
+      Alert.alert('Success', 'Category deleted');
+    } catch (error: any) {
+      const errorMsg = error?.toString?.() || '';
+      if (errorMsg.includes('404')) {
+        Alert.alert('Error', 'Category not found. It may have already been deleted.');
+      } else {
+        Alert.alert('Error', 'Failed to delete category');
+      }
+    }
+  };
+  const addBudget = async () => {
+    if (!newBudget.category || !newBudget.limit) {
+      Alert.alert('Error', 'Please enter both category and budget limit');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await apiService.addCategoryWithBudget({
+        category: newBudget.category,
+        limit: parseFloat(newBudget.limit),
+        period: newBudget.period || 'monthly',
+      });
+      setShowAddModal(false);
+      setNewBudget({ category: '', limit: '', period: 'monthly' });
+      await loadBudgets();
+      Alert.alert('Success', 'Budget added');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add budget');
+    }
+    setIsLoading(false);
+  };
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [editBudgetModal, setEditBudgetModal] = useState<{ visible: boolean; budget: Budget | null }>({ visible: false, budget: null });
+  const [editLimit, setEditLimit] = useState('');
   const [totalBudget, setTotalBudget] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
-  // Removed showCategoryManager state
-  const [insights, setInsights] = useState<string>('');
-  const [newBudget, setNewBudget] = useState({
-    category: '',
-    limit: '',
-    period: 'monthly', // default value, can be changed to 'weekly' if needed
-  });
+  const [newBudget, setNewBudget] = useState({ category: '', limit: '', period: 'monthly' });
   const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  // Removed useCategories hook
-
+  const [insights, setInsights] = useState<string>('');
   const loadBudgets = async () => {
     try {
       const [allBudgets, allGoals] = await Promise.all([
@@ -44,50 +82,17 @@ export default function BudgetScreen() {
       ]);
       setBudgets(allBudgets);
       setGoals(allGoals);
-      
       const total = allBudgets.reduce((sum, b) => sum + b.limit, 0);
       const spent = allBudgets.reduce((sum, b) => sum + b.spent, 0);
       setTotalBudget(total);
       setTotalSpent(spent);
-
-      // Insights feature removed for minimal interface
     } catch (error) {
       console.error('Error loading budgets:', error);
     }
   };
-
-  const addBudget = async () => {
-    if (!newBudget.category || !newBudget.limit || !newBudget.period) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const data = {
-        category: newBudget.category.trim(),
-        limit: parseFloat(newBudget.limit),
-        period: newBudget.period,
-      };
-      await apiService.addCategoryWithBudget(data);
-      await loadBudgets();
-      setNewBudget({ category: '', limit: '', period: 'monthly' });
-      setShowAddModal(false);
-    } catch (error) {
-      console.error('Error adding category and budget:', error);
-      Alert.alert('Error', 'Failed to add category and budget. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadBudgets();
-  }, []);
-
+  useEffect(() => { loadBudgets(); }, []);
   const overBudgetCount = budgets.filter(b => b.spent > b.limit).length;
   const remainingBudget = totalBudget - totalSpent;
-
   return (
     <SafeAreaView style={globalStyles.safeArea}>
       <View style={styles.header}>
@@ -110,21 +115,12 @@ export default function BudgetScreen() {
               <Text style={styles.statLabel}>Total Budget</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.warning[500] }]}>
-                ${totalSpent.toFixed(0)}
-              </Text>
+              <Text style={[styles.statValue, { color: colors.warning[500] }]}>${totalSpent.toFixed(0)}</Text>
               <Text style={styles.statLabel}>Spent</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={[
-                styles.statValue, 
-                { color: remainingBudget >= 0 ? colors.success[500] : colors.error[500] }
-              ]}>
-                ${Math.abs(remainingBudget).toFixed(0)}
-              </Text>
-              <Text style={styles.statLabel}>
-                {remainingBudget >= 0 ? 'Remaining' : 'Over Budget'}
-              </Text>
+              <Text style={[styles.statValue, { color: remainingBudget >= 0 ? colors.success[500] : colors.error[500] }]}>${Math.abs(remainingBudget).toFixed(0)}</Text>
+              <Text style={styles.statLabel}>{remainingBudget >= 0 ? 'Remaining' : 'Over Budget'}</Text>
             </View>
           </View>
           {overBudgetCount > 0 && (
@@ -146,7 +142,15 @@ export default function BudgetScreen() {
           <Text style={styles.sectionTitle}>Budget Categories</Text>
           {budgets.length > 0 ? (
             budgets.map((budget) => (
-              <BudgetProgress key={budget.id} budget={budget} />
+              <BudgetProgress
+                key={budget.id}
+                budget={budget}
+                onEdit={() => {
+                  setEditBudgetModal({ visible: true, budget });
+                  setEditLimit(budget.limit.toString());
+                }}
+                onDelete={() => handleDeleteBudgetCategory(budget)}
+              />
             ))
           ) : (
             <View style={styles.emptyState}>
@@ -222,7 +226,50 @@ export default function BudgetScreen() {
           </View>
         </SafeAreaView>
       </Modal>
-
+      {/* Edit Budget Modal */}
+      <Modal
+        visible={editBudgetModal.visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setEditBudgetModal({ visible: false, budget: null })}
+      >
+        <SafeAreaView style={globalStyles.safeArea}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setEditBudgetModal({ visible: false, budget: null })}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Edit Budget Limit</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                if (!editBudgetModal.budget) return;
+                try {
+                  await apiService.updateBudget(editBudgetModal.budget.id, { limit: parseFloat(editLimit) });
+                  setEditBudgetModal({ visible: false, budget: null });
+                  await loadBudgets();
+                  Alert.alert('Success', 'Budget limit updated');
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to update budget limit');
+                }
+              }}
+            >
+              <Text style={styles.modalSave}>Save</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalContent}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Budget Limit</Text>
+              <TextInput
+                style={globalStyles.input}
+                placeholder="Enter new budget amount"
+                placeholderTextColor={colors.neutral[400]}
+                value={editLimit}
+                onChangeText={setEditLimit}
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
       {/* Removed Category Manager Modal */}
     </SafeAreaView>
   );

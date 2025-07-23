@@ -1,13 +1,18 @@
 import React from 'react';
+import { TouchableOpacity } from 'react-native';
+import { Edit3 } from 'lucide-react-native';
+import { Trash2 } from 'lucide-react-native';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { Budget } from '@/services/api';
 
 interface BudgetProgressProps {
   budget: Budget;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-export function BudgetProgress({ budget }: BudgetProgressProps) {
+export function BudgetProgress({ budget, onEdit, onDelete }: BudgetProgressProps) {
   const progress = Math.min(budget.spent / budget.limit, 1);
   const remaining = Math.max(budget.limit - budget.spent, 0);
   const isOverBudget = budget.spent > budget.limit;
@@ -27,13 +32,23 @@ export function BudgetProgress({ budget }: BudgetProgressProps) {
     return isNaN(value) ? '0' : Math.round(value * 100).toString();
   };
 
+  const safeOnDelete = onDelete || (() => {});
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.category}>{budget.category || 'Unknown Category'}</Text>
         <Text style={styles.period}>{budget.period || 'monthly'}</Text>
+        <View style={{ flexDirection: 'row' }}>
+          <TouchableOpacity onPress={onEdit} style={{ marginLeft: 8 }}>
+            <Edit3 size={18} color={colors.primary[500]} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={safeOnDelete} style={{ marginLeft: 8 }}>
+            {/* Use a trash/delete icon from lucide-react-native or similar */}
+            {/* @ts-ignore */}
+            <Trash2 size={18} color={colors.error[500]} />
+          </TouchableOpacity>
+        </View>
       </View>
-      
       <View style={styles.progressContainer}>
         <View style={styles.progressBar}>
           <View 
@@ -50,7 +65,6 @@ export function BudgetProgress({ budget }: BudgetProgressProps) {
           {formatPercentage(progress)}%
         </Text>
       </View>
-      
       <View style={styles.amounts}>
         <Text style={styles.spent}>
           ${formatAmount(budget.spent)} spent

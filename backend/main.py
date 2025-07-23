@@ -170,10 +170,22 @@ def delete_transaction(transaction_id: str, db: Session = Depends(get_db)):
     return {"message": "Transaction deleted successfully"}
 
 # Budget endpoints
+@app.get("/api/transactions/{transaction_id}", response_model=Transaction)
+def get_transaction_by_id(transaction_id: str, db: Session = Depends(get_db)):
+    transaction = db.query(TransactionDB).filter(TransactionDB.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return Transaction(
+        id=transaction.id,
+        description=transaction.description,
+        amount=transaction.amount,
+        category=transaction.category,
+        date=transaction.date,
+        type=transaction.type.value
+    )
 @app.get("/api/budgets", response_model=List[Budget])
 def get_budgets(db: Session = Depends(get_db)):
     budgets = db.query(BudgetDB).all()
-    # Convert enum to string for API response
     result = []
     for b in budgets:
         result.append(Budget(
@@ -184,6 +196,19 @@ def get_budgets(db: Session = Depends(get_db)):
             period=b.period
         ))
     return result
+
+@app.get("/api/budgets/{budget_id}", response_model=Budget)
+def get_budget_by_id(budget_id: str, db: Session = Depends(get_db)):
+    budget = db.query(BudgetDB).filter(BudgetDB.id == budget_id).first()
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return Budget(
+        id=budget.id,
+        category=budget.category,
+        limit=budget.limit,
+        spent=budget.spent,
+        period=budget.period
+    )
 
 @app.post("/api/budgets", response_model=Budget)
 def create_budget(budget: BudgetCreate, db: Session = Depends(get_db)):
@@ -236,43 +261,31 @@ def update_budget(budget_id: str, budget_update: BudgetUpdate, db: Session = Dep
 @app.get("/api/goals", response_model=List[Goal])
 def get_goals(db: Session = Depends(get_db)):
     goals = db.query(GoalDB).all()
-    return goals
+    result = []
+    for g in goals:
+        result.append(Goal(
+            id=g.id,
+            title=g.title,
+            target_amount=g.target_amount,
+            current_amount=g.current_amount,
+            deadline=g.deadline,
+            category=g.category
+        ))
+    return result
 
-@app.post("/api/goals", response_model=Goal)
-def create_goal(goal: GoalCreate, db: Session = Depends(get_db)):
-    # Generate ID based on timestamp
-    goal_id = str(int(datetime.now().timestamp() * 1000))
-    
-    db_goal = GoalDB(
-        id=goal_id,
-        title=goal.title,
-        target_amount=goal.target_amount,
-        current_amount=goal.current_amount,
-        deadline=goal.deadline,
-        category=goal.category
+# GET endpoint for budget by ID
+@app.get("/api/budgets/{budget_id}", response_model=Budget)
+def get_budget_by_id(budget_id: str, db: Session = Depends(get_db)):
+    budget = db.query(BudgetDB).filter(BudgetDB.id == budget_id).first()
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return Budget(
+        id=budget.id,
+        category=budget.category,
+        limit=budget.limit,
+        spent=budget.spent,
+        period=budget.period
     )
-    
-    db.add(db_goal)
-    db.commit()
-    db.refresh(db_goal)
-    
-    return db_goal
-
-@app.put("/api/goals/{goal_id}", response_model=Goal)
-def update_goal(goal_id: str, goal_update: GoalUpdate, db: Session = Depends(get_db)):
-    goal = db.query(GoalDB).filter(GoalDB.id == goal_id).first()
-    if not goal:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    
-    update_data = goal_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(goal, field, value)
-    
-    db.commit()
-    db.refresh(goal)
-    
-    return goal
-
 # Category endpoints
 @app.get("/api/categories", response_model=List[Category])
 def get_categories(db: Session = Depends(get_db)):
@@ -326,18 +339,24 @@ def delete_category(category_id: str, db: Session = Depends(get_db)):
     category = db.query(CategoryDB).filter(CategoryDB.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-    
-    # Check if category is in use by transactions or budgets
-    transactions_using = db.query(TransactionDB).filter(TransactionDB.category == category.name).first()
-    budgets_using = db.query(BudgetDB).filter(BudgetDB.category == category.name).first()
-    if transactions_using or budgets_using:
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot delete category that is in use by transactions or budgets"
-        )
-    
+
+    # Ensure 'Unknown' category exists
+    unknown_category = db.query(CategoryDB).filter(CategoryDB.name == "Unknown").first()
+    if not unknown_category:
+        unknown_category_id = str(int(datetime.now().timestamp() * 1000))
+        unknown_category = CategoryDB(id=unknown_category_id, name="Unknown", type="expense")
+        db.add(unknown_category)
+        db.flush()
+
+    # Update transactions to 'Unknown' category
+    db.query(TransactionDB).filter(TransactionDB.category == category.name).update({TransactionDB.category: "Unknown"})
+
+    # Delete budgets for this category
+    db.query(BudgetDB).filter(BudgetDB.category == category.name).delete()
+
     db.delete(category)
     db.commit()
+    return {"detail": "Category deleted, transactions updated to 'Unknown', budgets removed."}
     
     return {"message": "Category deleted successfully"}
 
