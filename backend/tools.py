@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import TransactionDB, BudgetDB, GoalDB, TransactionType
+from models import TransactionDB, BudgetDB, GoalDB, CategoryDB, TransactionType
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
@@ -79,7 +79,7 @@ def add_transaction(
         if not category:
             category = "miscellaneous"  # AI can override if it infers better
         if not type:
-            type = "expense" if amount < 0 else "income"  # AI can override if it infers better
+            type = "expense"  # Always record as expense
         transaction = TransactionDB(
             id=transaction_id,
             description=description,
@@ -99,6 +99,93 @@ def add_transaction(
             "date": transaction.date,
             "type": transaction.type.value,
         }
+    finally:
+        next(db_gen, None)
+
+def create_budget_category(category_name: str, limit: float, period: str = "monthly") -> dict:
+    """
+    Creates a new budget category and a corresponding budget.
+    Args:
+        category_name (str): The name of the new category.
+        limit (float): The budget limit for this category.
+        period (str): The budget period (e.g., "monthly"). Defaults to "monthly".
+    Returns:
+        dict: The created budget.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        # Check if category exists
+        category = db.query(CategoryDB).filter(CategoryDB.name == category_name).first()
+        if not category:
+            # Create category with default type
+            category_id = str(int(datetime.now().timestamp() * 1000))
+            category = CategoryDB(id=category_id, name=category_name, type="expense")
+            db.add(category)
+            db.commit()
+            db.refresh(category)
+
+        # Check if budget for this category already exists
+        existing_budget = db.query(BudgetDB).filter(BudgetDB.category == category_name, BudgetDB.period == period).first()
+        if existing_budget:
+            raise ValueError("Budget for this category and period already exists")
+
+        # Create budget
+        budget_id = str(int(datetime.now().timestamp() * 1000))
+        db_budget = BudgetDB(
+            id=budget_id,
+            category=category_name,
+            limit=limit,
+            spent=0.0,
+            period=period
+        )
+        db.add(db_budget)
+        db.commit()
+        db.refresh(db_budget)
+
+        return {
+            "id": db_budget.id,
+            "category": db_budget.category,
+            "limit": db_budget.limit,
+            "spent": db_budget.spent,
+            "period": db_budget.period
+        }
+    finally:
+        next(db_gen, None)
+
+
+def delete_budget_category(category_name: str) -> dict:
+    """
+    Deletes a budget category and associated budgets.
+    Args:
+        category_name (str): The name of the category to delete.
+    Returns:
+        dict: A confirmation message.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        category = db.query(CategoryDB).filter(CategoryDB.name == category_name).first()
+        if not category:
+            raise ValueError("Category not found")
+
+        # Ensure 'Unknown' category exists
+        unknown_category = db.query(CategoryDB).filter(CategoryDB.name == "Unknown").first()
+        if not unknown_category:
+            unknown_category_id = str(int(datetime.now().timestamp() * 1000))
+            unknown_category = CategoryDB(id=unknown_category_id, name="Unknown", type="expense")
+            db.add(unknown_category)
+            db.flush()
+
+        # Update transactions to 'Unknown' category
+        db.query(TransactionDB).filter(TransactionDB.category == category.name).update({TransactionDB.category: "Unknown"})
+
+        # Delete budgets for this category
+        db.query(BudgetDB).filter(BudgetDB.category == category.name).delete()
+
+        db.delete(category)
+        db.commit()
+        return {"detail": "Category deleted, transactions updated to 'Unknown', budgets removed."}
     finally:
         next(db_gen, None)
 
@@ -158,7 +245,7 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
                 "category": b.category,
                 "limit": b.limit,
                 "spent": b.spent,
-                "period": b.period.value,
+                "period": b.period,
             }
             for b in budgets
         ]
@@ -203,10 +290,22 @@ def create_goal(goal_data: dict) -> dict:
     """
     Creates a new financial goal.
     Args:
-        goal_data (dict): Data for the new goal.
+        goal_data (dict): Data for the new goal. Must include:
+            - title (str): The title of the goal. Required.
+            - target_amount (float): The target amount to save. Required.
+            - deadline (str): The deadline for the goal (ISO format). Required.
+            - category (str): The category for the goal. Required.
+            - current_amount (float, optional): The current amount saved. Defaults to 0.0.
     Returns:
         dict: The created goal.
+    Raises:
+        ValueError: If any required field is missing.
     """
+    required_fields = ["title", "target_amount", "deadline", "category"]
+    missing_fields = [field for field in required_fields if field not in goal_data]
+    if missing_fields:
+        raise ValueError(f"Missing required fields for goal creation: {', '.join(missing_fields)}")
+
     db_gen = get_db()
     db = next(db_gen)
     try:

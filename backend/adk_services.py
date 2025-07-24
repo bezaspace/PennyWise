@@ -2,7 +2,7 @@ from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from database import DATABASE_URL
-from tools import get_transactions, get_budgets, get_goals, add_transaction
+from tools import get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,11 @@ A user is asking for advice about their finances or wants to log a transaction.
 - If the user asks about their financial goals, savings targets, goal progress, or what they're saving for, use the `get_goals` tool to show their financial goals.
 - If the user says something like 'I bought something for this amount' or wants to log a purchase, use the `add_transaction` tool. If the user does not provide category, type, or date, you can decide/fill them yourself. Only description (what they bought) and amount (price) are required.
 - For general financial advice, answer based on your knowledge.
+- If the user wants to create a new budget category, use the `create_budget_category` tool.
+- If the user wants to delete a budget category, use the `delete_budget_category` tool.
+- If the user wants to create a new financial goal, use the `create_goal` tool.
+- If the user wants to update a financial goal, use the `update_goal` tool.
+- If the user wants to delete a financial goal, use the `delete_goal` tool.
 
 When you use these tools, explain what you found in a conversational way. For example:
 - "Let me check your recent transactions..." then use get_transactions
@@ -28,7 +33,7 @@ The user ID is always provided by the backend; never ask the user for their ID. 
 Respond in a conversational, clear, and concise manner.
 Analyze the results from the tools to provide specific, actionable advice.
 """,
-    tools=[get_transactions, get_budgets, get_goals, add_transaction],
+    tools=[get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal],
 )
 
 # Setup ADK services
@@ -44,7 +49,7 @@ financial_agent_text = LlmAgent(
     model="gemini-2.5-flash-lite-preview-06-17",
     name="FinancialAgentText",
     instruction=financial_agent.instruction,
-    tools=[get_transactions, get_budgets, get_goals, add_transaction],
+    tools=[get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal],
 )
 
 runner_text = Runner(
