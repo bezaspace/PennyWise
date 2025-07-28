@@ -40,82 +40,52 @@ def seed_database():
             CategoryDB(
                 id="cat_1",
                 name="Food & Dining",
-                type=CategoryType.expense,
-                icon="Utensils",
-                color="#f59e0b",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_2",
                 name="Shopping",
-                type=CategoryType.expense,
-                icon="ShoppingBag",
-                color="#8b5cf6",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_3",
                 name="Transportation",
-                type=CategoryType.expense,
-                icon="Car",
-                color="#06b6d4",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_4",
                 name="Entertainment",
-                type=CategoryType.expense,
-                icon="Film",
-                color="#f97316",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_5",
                 name="Healthcare",
-                type=CategoryType.expense,
-                icon="Heart",
-                color="#ef4444",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_6",
                 name="Bills & Utilities",
-                type=CategoryType.expense,
-                icon="Receipt",
-                color="#64748b",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_7",
                 name="Income",
-                type=CategoryType.income,
-                icon="TrendingUp",
-                color="#10b981",
-                is_default=1
+                type="income"
             ),
             CategoryDB(
                 id="cat_8",
                 name="Savings",
-                type=CategoryType.both,
-                icon="PiggyBank",
-                color="#3b82f6",
-                is_default=1
+                type="both"
             ),
             CategoryDB(
                 id="cat_9",
                 name="Travel",
-                type=CategoryType.expense,
-                icon="Plane",
-                color="#ec4899",
-                is_default=1
+                type="expense"
             ),
             CategoryDB(
                 id="cat_10",
                 name="Technology",
-                type=CategoryType.expense,
-                icon="Smartphone",
-                color="#6366f1",
-                is_default=1
+                type="expense"
             ),
         ]
         # Mock transactions (matching the original data)
@@ -169,28 +139,28 @@ def seed_database():
                 category="Food & Dining",
                 limit=400,
                 spent=134.25,
-                period=BudgetPeriod.monthly
+                period="monthly"
             ),
             BudgetDB(
                 id="2",
                 category="Transportation",
                 limit=200,
                 spent=45.20,
-                period=BudgetPeriod.monthly
+                period="monthly"
             ),
             BudgetDB(
                 id="3",
                 category="Entertainment",
                 limit=100,
                 spent=15.99,
-                period=BudgetPeriod.monthly
+                period="monthly"
             ),
             BudgetDB(
                 id="4",
                 category="Shopping",
                 limit=300,
                 spent=0,
-                period=BudgetPeriod.monthly
+                period="monthly"
             ),
         ]
         
