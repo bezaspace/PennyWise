@@ -73,33 +73,71 @@ class OrchestratorAgent:
 
     async def run(self, ticker, company_name=None):
         print(f"Detecting price-changing events for {ticker}...")
-        # Fetch 90 days of daily price data, select top 15 events
         events = self.event_agent.get_price_events(ticker, lookback_days=90, num_events=15)
         if not events:
             print("No significant price events found.")
             return []
         print(f"Found {len(events)} significant price events.")
-        # Use Google Search agent for news
+
+        # Create a ParallelAgent with gemini-2.0-flash-lite for each event
+        from google.adk.agents import ParallelAgent, Agent
+
         app_name = "investment_news_tracker"
         user_id = "cli_user"
         session_service = InMemorySessionService()
         session = await session_service.create_session(app_name=app_name, user_id=user_id)
-        runner = Runner(agent=investment_news_agent, app_name=app_name, session_service=session_service)
-        results = []
+
+        # Create a dedicated agent for each event
+        sub_agents = []
         for event in events:
             date = event["date"]
+            safe_date = date.replace("-", "_")
             search_query = f"{company_name or ticker} investment news {date}"
-            print(f"Fetching news for {search_query}...")
-            content = types.Content(
-                role="user",
-                parts=[types.Part(text=f"Use Google Search to find and summarize investment news articles about {company_name or ticker} for {date} from reputable sources. List headlines, sources, and dates, and provide a readable summary. If no news is found, state that clearly.")]
+            agent = Agent(
+                name=f"news_agent_{safe_date}",
+                model="gemini-2.0-flash-lite",
+                description="Agent that aggregates recent news about a stock using Google Search.",
+                instruction=(
+                    f"You are an expert financial news aggregator. "
+                    f"Use the google_search tool to find and summarize investment news articles about {company_name or ticker} for {date} from reputable sources. "
+                    "List headlines, sources, and dates, and provide a readable summary. If no news is found, state that clearly."
+                ),
+                tools=[google_search]
             )
-            final_response = None
-            async for event_obj in runner.run_async(session_id=session.id, user_id=user_id, new_message=content):
-                if event_obj.is_final_response():
-                    if event_obj.content and event_obj.content.parts:
-                        final_response = event_obj.content.parts[0].text
-            results.append({"event": event, "news_summary": final_response})
+            sub_agents.append(agent)
+
+        # Prepare ParallelAgent
+        parallel_agent = ParallelAgent(
+            name="parallel_news_gatherer",
+            sub_agents=sub_agents
+        )
+
+        runner = Runner(agent=parallel_agent, app_name=app_name, session_service=session_service)
+
+        # Prepare a mapping of agent name to its query
+        queries = {}
+        for event in events:
+            date = event["date"]
+            safe_date = date.replace("-", "_")
+            agent_name = f"news_agent_{safe_date}"
+            queries[agent_name] = f"Use Google Search to find and summarize investment news articles about {company_name or ticker} for {date} from reputable sources. List headlines, sources, and dates, and provide a readable summary. If no news is found, state that clearly."
+
+        # Create a single Content object with all queries
+        content = types.Content(
+            role="user",
+            parts=[types.Part(text=str(queries))]
+        )
+
+        results = []
+        for idx, agent in enumerate(sub_agents):
+            print(f"Fetching news for {company_name or ticker} {events[idx]['date']}...")
+        async for event_obj in runner.run_async(session_id=session.id, user_id=user_id, new_message=content):
+            if event_obj.is_final_response():
+                agent_name = event_obj.author
+                for i, agent in enumerate(sub_agents):
+                    if agent.name == agent_name:
+                        results.append({"event": events[i], "news_summary": event_obj.content.parts[0].text if event_obj.content and event_obj.content.parts else None})
+                        break
         return results
 
 # --- ADK Agent for readable summary (fallback)
