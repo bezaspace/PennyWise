@@ -1,7 +1,7 @@
 import { Transaction, Budget, Goal } from '@/services/api';
 
 export interface ParsedToolData {
-  type: 'transactions' | 'budgets' | 'goals' | 'plan' | null;
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | null;
   data: any[];
   hasToolData: boolean;
 }
@@ -263,6 +263,35 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
 
   console.log(`Parsing tool response for ${toolName}:`, toolData);
 
+  // Normalize common ADK wrappers and stringified JSON
+  const unwrap = (payload: any): any => {
+    try {
+      if (payload == null) return payload;
+      // Stringified JSON
+      if (typeof payload === 'string') {
+        try {
+          return JSON.parse(payload);
+        } catch {
+          return payload;
+        }
+      }
+      // Common wrappers
+      if (typeof payload === 'object') {
+        if ('result' in payload && typeof (payload as any).result === 'string') {
+          try { return JSON.parse((payload as any).result as string); } catch { /* ignore */ }
+        }
+        if ('output' in payload) return (payload as any).output;
+        if ('response' in payload) return (payload as any).response;
+        if ('data' in payload) return (payload as any).data;
+      }
+      return payload;
+    } catch {
+      return payload;
+    }
+  };
+
+  const normalized = unwrap(toolData);
+
   switch (toolName) {
     case 'get_transactions':
       result.type = 'transactions';
@@ -369,6 +398,72 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
         result.data = [toolData.plan];
         result.hasToolData = true;
       }
+      break;
+
+    // --- Investment tools ---
+    case 'get_investment_holdings':
+      result.type = 'holdings';
+      if (Array.isArray(normalized)) {
+        result.data = normalized;
+      } else if (normalized && typeof normalized === 'object') {
+        const arr = (normalized as any).holdings || (normalized as any).data || normalized;
+        if (Array.isArray(arr)) result.data = arr;
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'get_portfolio_summary':
+      result.type = 'portfolio_summary';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'list_trades':
+      result.type = 'trades';
+      if (Array.isArray(normalized)) {
+        result.data = normalized;
+      } else if (normalized && typeof normalized === 'object') {
+        const arr = (normalized as any).trades || (normalized as any).data || normalized;
+        if (Array.isArray(arr)) result.data = arr;
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'create_trade':
+      result.type = 'trades';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'get_watchlist':
+      result.type = 'watchlist';
+      if (Array.isArray(normalized)) {
+        result.data = normalized;
+      } else if (normalized && typeof normalized === 'object') {
+        const arr = (normalized as any).watchlist || (normalized as any).data || normalized;
+        if (Array.isArray(arr)) result.data = arr;
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'add_watchlist_item':
+      result.type = 'watchlist';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'get_quote':
+      result.type = 'quote';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
       break;
 
     default:

@@ -164,9 +164,8 @@ portfolio_insight_agent = LlmAgent(
     ],
 )
 
-# Coordinator: InvestmentAgent invokes specialists explicitly via AgentTool
+# Coordinator: InvestmentAgent invokes MarketResearch via AgentTool, and calls portfolio tools directly
 market_research_tool = agent_tool.AgentTool(agent=market_research_agent)
-portfolio_insight_tool = agent_tool.AgentTool(agent=portfolio_insight_agent)
 
 investment_agent = LlmAgent(
     model="gemini-2.0-flash-live-001",
@@ -175,11 +174,24 @@ investment_agent = LlmAgent(
     instruction=(
         "You are the coordinator for investment advice.\n"
         "- If the user asks about latest news, earnings, or external info about a stock/index/sector, call the MarketResearchAgent tool.\n"
-        "- If the user asks about their holdings, performance, gains, trades, watchlist, or quotes, call the PortfolioInsightAgent tool.\n"
+        "- If the user asks about their holdings, performance, gains, trades, watchlist, or quotes, CALL THE PROVIDED PORTFOLIO TOOLS DIRECTLY (do not delegate).\n"
         "- Combine specialist outputs into tailored advice considering diversification, risk, time horizon (if inferred), and concentration.\n"
-        "- Be explicit about uncertainty and avoid guarantees. Offer next steps (rebalance, add/remove watchlist, or set alerts/goals)."
+        "- Be explicit about uncertainty and avoid guarantees. Offer next steps (rebalance, add/remove watchlist, or set alerts/goals).\n"
+        "- Never ask for a user id. The backend provides context. Always return the structured tool results."
     ),
-    tools=[market_research_tool, portfolio_insight_tool],
+    tools=[
+        # Research via AgentTool
+        market_research_tool,
+        # Portfolio tools directly for structured UI rendering
+        get_investment_holdings,
+        get_portfolio_summary,
+        list_trades,
+        create_trade,
+        get_quote,
+        get_watchlist,
+        add_watchlist_item,
+        delete_watchlist_item,
+    ],
 )
 
 investment_runner = Runner(

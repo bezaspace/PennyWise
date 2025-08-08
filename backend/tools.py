@@ -630,7 +630,7 @@ def _compute_holdings_internal(db: Session) -> tuple[list[dict], dict[str, dict]
     return holdings, by_symbol
 
 
-def get_investment_holdings(user_id: str) -> list[dict]:
+def get_investment_holdings() -> list[dict]:
     """
     Returns the user's current equity holdings aggregated from trades with real-time quotes.
     """
@@ -639,12 +639,16 @@ def get_investment_holdings(user_id: str) -> list[dict]:
     try:
         holdings, _ = _compute_holdings_internal(db)
         holdings.sort(key=lambda h: h.get("value", 0.0), reverse=True)
+        try:
+            queue_tool_response("get_investment_holdings", holdings)
+        except Exception:
+            pass
         return holdings
     finally:
         next(db_gen, None)
 
 
-def get_portfolio_summary(user_id: str) -> dict:
+def get_portfolio_summary() -> dict:
     """
     Returns a summary of the user's portfolio: total value, day change, overall gain, and timestamps.
     """
@@ -682,7 +686,7 @@ def get_portfolio_summary(user_id: str) -> dict:
             if q:
                 last_updated = max(last_updated, float(q.get("last_updated", 0.0)))
 
-        return {
+        summary = {
             "total_value": round(total_value, 2),
             "day_change": round(day_change, 2),
             "day_change_percent": round(day_change_pct, 4),
@@ -690,11 +694,16 @@ def get_portfolio_summary(user_id: str) -> dict:
             "overall_gain_percent": round(overall_gain_pct, 4),
             "last_updated": last_updated,
         }
+        try:
+            queue_tool_response("get_portfolio_summary", summary)
+        except Exception:
+            pass
+        return summary
     finally:
         next(db_gen, None)
 
 
-def list_trades(user_id: str, limit: int) -> list[dict]:
+def list_trades(limit: int) -> list[dict]:
     """
     Returns list of trades, most recent first. Optional limit to top N.
     """
@@ -705,7 +714,7 @@ def list_trades(user_id: str, limit: int) -> list[dict]:
         if limit and limit > 0:
             q = q.limit(limit)
         items = q.all()
-        return [
+        data = [
             {
                 "id": t.id,
                 "symbol": t.symbol,
@@ -718,12 +727,16 @@ def list_trades(user_id: str, limit: int) -> list[dict]:
             }
             for t in items
         ]
+        try:
+            queue_tool_response("list_trades", data)
+        except Exception:
+            pass
+        return data
     finally:
         next(db_gen, None)
 
 
 def create_trade(
-    user_id: str,
     symbol: str,
     type: str,
     quantity: float,
@@ -775,7 +788,7 @@ def create_trade(
         db.add(db_trade)
         db.commit()
         db.refresh(db_trade)
-        return {
+        created = {
             "id": db_trade.id,
             "symbol": db_trade.symbol,
             "company_name": db_trade.company_name,
@@ -785,6 +798,11 @@ def create_trade(
             "fees": float(db_trade.fees),
             "date": db_trade.date,
         }
+        try:
+            queue_tool_response("create_trade", created)
+        except Exception:
+            pass
+        return created
     finally:
         next(db_gen, None)
 
@@ -796,10 +814,14 @@ def get_quote(symbol: str) -> dict:
     q = get_symbol_quote(symbol)
     if not q:
         raise ValueError("Quote not available")
+    try:
+        queue_tool_response("get_quote", q)
+    except Exception:
+        pass
     return q
 
 
-def get_watchlist(user_id: str) -> list[dict]:
+def get_watchlist() -> list[dict]:
     """
     Returns current watchlist items.
     """
@@ -807,15 +829,20 @@ def get_watchlist(user_id: str) -> list[dict]:
     db = next(db_gen)
     try:
         items = db.query(WatchlistItemDB).order_by(WatchlistItemDB.created_at.desc()).all()
-        return [
+        data = [
             {"id": i.id, "symbol": i.symbol, "company_name": i.company_name}
             for i in items
         ]
+        try:
+            queue_tool_response("get_watchlist", data)
+        except Exception:
+            pass
+        return data
     finally:
         next(db_gen, None)
 
 
-def add_watchlist_item(user_id: str, symbol: str, company_name: str) -> dict:
+def add_watchlist_item(symbol: str, company_name: str) -> dict:
     """
     Adds a symbol to watchlist if not present.
     """
@@ -827,16 +854,26 @@ def add_watchlist_item(user_id: str, symbol: str, company_name: str) -> dict:
             raise ValueError("Symbol is required")
         existing = db.query(WatchlistItemDB).filter(WatchlistItemDB.symbol == symbol_u).first()
         if existing:
-            return {
+            result = {
                 "id": existing.id,
                 "symbol": existing.symbol,
                 "company_name": existing.company_name,
             }
+            try:
+                queue_tool_response("add_watchlist_item", result)
+            except Exception:
+                pass
+            return result
         item = WatchlistItemDB(id=str(uuid.uuid4()), symbol=symbol_u, company_name=company_name)
         db.add(item)
         db.commit()
         db.refresh(item)
-        return {"id": item.id, "symbol": item.symbol, "company_name": item.company_name}
+        result = {"id": item.id, "symbol": item.symbol, "company_name": item.company_name}
+        try:
+            queue_tool_response("add_watchlist_item", result)
+        except Exception:
+            pass
+        return result
     finally:
         next(db_gen, None)
 
