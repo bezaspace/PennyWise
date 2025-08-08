@@ -84,6 +84,104 @@ class ReceiptService:
                 "error": f"Failed to process receipt: {str(e)}",
                 "confidence": "low"
             }
+
+    async def analyze_item_image(self, image_data: bytes, mime_type: str) -> Dict[str, Any]:
+        """
+        Analyze a general shopping item photo to identify the item and detect price if visible.
+        Returns a structured object suitable for follow-up in chat.
+        """
+        try:
+            image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
+
+            prompt = """
+            You are analyzing a shopping product photo. Return STRICT JSON only.
+
+            Extract:
+            {
+              "name": "Short product name (e.g., 'Nike Air Max 270')",
+              "brand": "Brand if visible, else empty string",
+              "description": "1-2 sentence helpful description of what this is",
+              "category": "Best everyday spending category (groceries, food, shopping, entertainment, transportation, healthcare, etc.)",
+              "detected_price": "If a clear price tag/label is visible, the numeric price; else null",
+              "price_found": "true if a reliable price is visible; else false",
+              "confidence": "high|medium|low"
+            }
+
+            Rules:
+            - Do NOT guess a price. Only set detected_price when a literal price is clearly visible.
+            - If multiple prices are visible, choose the most prominent/likely final price.
+            - Keep description concise and useful.
+            - If this is clearly a receipt, return {"error": "This is a receipt image"}.
+            - Return only valid JSON.
+            """
+
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[image_part, prompt]
+            )
+
+            if not response.text:
+                raise ValueError("No response from Gemini (item analysis)")
+
+            raw_data = self._parse_gemini_response(response.text)
+            if "error" in raw_data:
+                return {"error": raw_data.get("error", "Item analysis failed"), "confidence": "low"}
+
+            cleaned = self._validate_and_clean_item_data(raw_data)
+            cleaned["type"] = "item"
+            logger.info(f"Successfully analyzed item image: {cleaned}")
+            return cleaned
+
+        except Exception as e:
+            logger.error(f"Error analyzing item image: {e}")
+            return {
+                "error": f"Failed to analyze item image: {str(e)}",
+                "confidence": "low"
+            }
+
+    def _validate_and_clean_item_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalize item analysis data."""
+        if "error" in data:
+            return data
+
+        cleaned: Dict[str, Any] = {}
+
+        cleaned["name"] = str(data.get("name", "Unknown item")).strip() or "Unknown item"
+        cleaned["brand"] = str(data.get("brand", "")).strip()
+        cleaned["description"] = str(data.get("description", "Item of interest")).strip() or "Item of interest"
+
+        category = str(data.get("category", "shopping")).lower().strip()
+        category_mapping = {
+            "groceries": "groceries",
+            "grocery": "groceries",
+            "food": "food",
+            "restaurant": "food",
+            "dining": "food",
+            "transportation": "transportation",
+            "gas": "transportation",
+            "fuel": "transportation",
+            "entertainment": "entertainment",
+            "health": "healthcare",
+            "healthcare": "healthcare",
+            "pharmacy": "healthcare",
+            "shopping": "shopping",
+            "retail": "shopping",
+        }
+        cleaned["category"] = category_mapping.get(category, "shopping")
+
+        detected_price = None
+        try:
+            if data.get("detected_price") is not None:
+                detected_price = float(data.get("detected_price"))
+        except (ValueError, TypeError):
+            detected_price = None
+        cleaned["detected_price"] = detected_price
+        cleaned["price_found"] = bool(data.get("price_found", detected_price is not None))
+
+        confidence = str(data.get("confidence", "medium")).lower()
+        cleaned["confidence"] = confidence if confidence in ["high", "medium", "low"] else "medium"
+
+        return cleaned
     
     def _parse_gemini_response(self, response_text: str) -> Dict[str, Any]:
         """Parse Gemini's response and extract JSON."""

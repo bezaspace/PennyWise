@@ -13,18 +13,30 @@ import { Upload } from 'lucide-react-native';
 import { colors } from '@/constants/colors';
 import { geminiService } from '@/services/gemini';
 
-interface ReceiptData {
-  merchant: string;
-  amount: number;
-  date: string;
-  category: string;
-  description: string;
-  items: string[];
-  confidence: string;
-}
+type ReceiptOrItemData =
+  | {
+      type?: undefined;
+      merchant: string;
+      amount: number;
+      date: string;
+      category: string;
+      description: string;
+      items: string[];
+      confidence: string;
+    }
+  | {
+      type: 'item';
+      name: string;
+      brand?: string;
+      description: string;
+      category: string;
+      detected_price: number | null;
+      price_found: boolean;
+      confidence: string;
+    };
 
 interface ReceiptUploadProps {
-  onReceiptProcessed: (data: ReceiptData) => void;
+  onReceiptProcessed: (data: ReceiptOrItemData) => void;
   onError?: (error: string) => void;
 }
 
@@ -67,7 +79,7 @@ export default function ReceiptUpload({ onReceiptProcessed, onError }: ReceiptUp
       console.log('ReceiptUpload: Processing result:', result);
       
       if (result.success && result.data) {
-        onReceiptProcessed(result.data);
+        onReceiptProcessed(result.data as ReceiptOrItemData);
       } else {
         const errorMessage = result.error || result.message || 'Failed to process receipt';
         console.error('ReceiptUpload: Processing error:', errorMessage);
@@ -137,8 +149,8 @@ export default function ReceiptUpload({ onReceiptProcessed, onError }: ReceiptUp
     // On web, camera access is limited, so just show library option
     if (Platform.OS === 'web') {
       Alert.alert(
-        'Upload Receipt',
-        'Choose an image file from your computer:',
+        'Upload Photo',
+        'Choose an image file from your computer (receipt or item photo):',
         [
           {
             text: 'Choose File',
@@ -157,8 +169,8 @@ export default function ReceiptUpload({ onReceiptProcessed, onError }: ReceiptUp
     } else {
       // Mobile options
       Alert.alert(
-        'Upload Receipt',
-        'Choose how you want to add your receipt:',
+        'Upload Photo',
+        'Choose how you want to add your receipt or item photo:',
         [
           {
             text: 'Take Photo',
@@ -245,7 +257,7 @@ export default function ReceiptUpload({ onReceiptProcessed, onError }: ReceiptUp
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
         <Upload size={18} color={colors.primary[500]} />
-        <Text style={styles.uploadText}>Receipt</Text>
+        <Text style={styles.uploadText}>Photo</Text>
       </TouchableOpacity>
     </View>
   );

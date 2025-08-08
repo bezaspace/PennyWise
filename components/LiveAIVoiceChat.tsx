@@ -17,15 +17,27 @@ interface VoiceMessage {
   };
 }
 
-interface ReceiptData {
-  merchant: string;
-  amount: number;
-  date: string;
-  category: string;
-  description: string;
-  items: string[];
-  confidence: string;
-}
+type ReceiptOrItemData =
+  | {
+      type?: undefined;
+      merchant: string;
+      amount: number;
+      date: string;
+      category: string;
+      description: string;
+      items: string[];
+      confidence: string;
+    }
+  | {
+      type: 'item';
+      name: string;
+      brand?: string;
+      description: string;
+      category: string;
+      detected_price: number | null;
+      price_found: boolean;
+      confidence: string;
+    };
 
 const DEFAULT_WS_URL = `ws://${window.location.hostname}:8000/api/ai/voice/ws/user_123`;
 
@@ -34,7 +46,7 @@ export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assista
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [transcript, setTranscript] = useState('');
-  const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null);
+  const [currentReceipt, setCurrentReceipt] = useState<ReceiptOrItemData | null>(null);
   
   const ws = useRef<WebSocket | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -68,7 +80,7 @@ export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assista
   }
 
   // Receipt handling functions
-  const handleReceiptProcessed = (receiptData: ReceiptData) => {
+  const handleReceiptProcessed = (receiptData: ReceiptOrItemData) => {
     console.log('LiveAIVoiceChat: Receipt processed:', receiptData);
     
     // Store the receipt data
@@ -77,30 +89,44 @@ export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assista
     // Add user message showing receipt was uploaded
     const userMessage: VoiceMessage = {
       id: Date.now().toString(),
-      text: `Receipt uploaded: ${receiptData.merchant} - $${receiptData.amount.toFixed(2)}`,
+      text:
+        'type' in receiptData && receiptData.type === 'item'
+          ? `Item photo uploaded: ${receiptData.name}${receiptData.brand ? ' (' + receiptData.brand + ')' : ''}${
+              receiptData.price_found && typeof receiptData.detected_price === 'number'
+                ? ` - $${receiptData.detected_price.toFixed(2)}`
+                : ''
+            }`
+          : `Receipt uploaded: ${receiptData.merchant} - $${(receiptData as any).amount?.toFixed?.(2) ?? ''}`,
       isUser: true,
       receiptData,
     };
     
     setMessages(prev => [...prev, userMessage]);
     
-    // Send receipt context to AI via WebSocket
+    // Send context to AI via WebSocket (receipt or item)
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      const receiptContext = `I've received a receipt with the following details:
-Merchant: ${receiptData.merchant}
-Amount: $${receiptData.amount.toFixed(2)}
-Date: ${receiptData.date}
-Category: ${receiptData.category}
+      const dataStr =
+        'type' in receiptData && receiptData.type === 'item'
+          ? `I've taken a photo of an item while shopping. Here are the details I see:
+Item: ${receiptData.name}${receiptData.brand ? ` (Brand: ${receiptData.brand})` : ''}
 Description: ${receiptData.description}
-Items: ${receiptData.items.join(', ')}
+Category: ${receiptData.category}
+PriceDetected: ${receiptData.price_found ? `$${receiptData.detected_price?.toFixed(2)}` : 'No'}
 Confidence: ${receiptData.confidence}
+
+If the price is not detected above, please ask me for the price first. After I tell you the price, advise me whether buying this is a good idea considering my budgets, recent spending, and goals. If I still choose to buy it, add it as a transaction.`
+          : `I've received a receipt with the following details:
+Merchant: ${(receiptData as any).merchant}
+Amount: $${(receiptData as any).amount?.toFixed?.(2) ?? ''}
+Date: ${(receiptData as any).date}
+Category: ${(receiptData as any).category}
+Description: ${(receiptData as any).description}
+Items: ${((receiptData as any).items || []).join(', ')}
+Confidence: ${(receiptData as any).confidence}
 
 Please acknowledge that you've received this receipt information and ask if I'd like you to add it as a transaction to my records.`;
 
-      const message = {
-        mime_type: "text/plain",
-        data: receiptContext
-      };
+      const message = { mime_type: 'text/plain', data: dataStr };
       
       ws.current.send(JSON.stringify(message));
       console.log('LiveAIVoiceChat: Sent receipt context to AI');

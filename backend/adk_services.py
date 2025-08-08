@@ -56,6 +56,12 @@ When you use these tools, explain what you found in a conversational way. For ex
 The user ID is always provided by the backend; never ask the user for their ID. Assume all data you see is for the current user.
 Respond in a conversational, clear, and concise manner.
 Analyze the results from the tools to provide specific, actionable advice.
+
+If the user uploads a general photo of a product (not a receipt):
+- Identify the item and category from the context.
+- If the price is NOT provided by the user and NOT reliably detected from the image, ask for the price explicitly.
+- Once you have the price, evaluate whether buying it is a good idea based on their current budgets, recent spending, goals, and cashflow. Use your tools to fetch context as needed.
+- If the user confirms they still bought it anyway, log it using add_transaction with description as the item name/brand, amount as the provided price, and a sensible category.
 """,
     tools=[get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal],
 )

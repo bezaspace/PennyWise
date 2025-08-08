@@ -859,7 +859,9 @@ async def chat_stream(request: FinancialAdviceRequest):
 @router.post("/receipt/upload", response_model=ReceiptUploadResponse)
 async def upload_receipt(file: UploadFile = File(...)):
     """
-    Upload and process a receipt image to extract transaction details.
+    Upload and process a receipt or item image.
+    - If it's a receipt, extract transaction details.
+    - If it's a general shopping item photo, extract item details and attempt price detection.
     """
     try:
         # Validate file type
@@ -881,20 +883,38 @@ async def upload_receipt(file: UploadFile = File(...)):
                 message="Please upload a smaller image file."
             )
         
-        # Process the receipt
+        # Try processing as a receipt first
         receipt_data = await receipt_service.extract_receipt_data(
             image_data=image_data,
             mime_type=file.content_type
         )
-        
-        # Check if processing was successful
+
+        # If it's not a valid receipt, fall back to item analysis
+        if isinstance(receipt_data, dict) and "error" in receipt_data and "receipt" in receipt_data["error"].lower():
+            item_data = await receipt_service.analyze_item_image(
+                image_data=image_data,
+                mime_type=file.content_type
+            )
+            if "error" in item_data:
+                return ReceiptUploadResponse(
+                    success=False,
+                    error=item_data["error"],
+                    message="Could not analyze the image. Please try a clearer photo."
+                )
+            return ReceiptUploadResponse(
+                success=True,
+                data=item_data,
+                message="Item photo processed. I can help evaluate whether it's a good purchase."
+            )
+
+        # Otherwise, treat as receipt
         if "error" in receipt_data:
             return ReceiptUploadResponse(
                 success=False,
                 error=receipt_data["error"],
                 message="Could not extract receipt information from the image."
             )
-        
+
         return ReceiptUploadResponse(
             success=True,
             data=receipt_data,
