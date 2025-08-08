@@ -8,8 +8,8 @@ echo ""
 
 cd backend
 
-echo "📦 Installing dependencies..."
-pip install -r requirements.txt
+# echo "📦 Installing dependencies..."
+# pip install -r requirements.txt
 
 if [ $? -ne 0 ]; then
     echo ""

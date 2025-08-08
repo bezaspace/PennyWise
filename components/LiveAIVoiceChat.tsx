@@ -12,7 +12,7 @@ interface VoiceMessage {
   isUser: boolean;
   receiptData?: any;
   toolData?: {
-    type: 'transactions' | 'budgets' | 'goals';
+      type: 'transactions' | 'budgets' | 'goals' | 'plan';
     data: any[];
   };
 }
@@ -316,17 +316,27 @@ Please acknowledge that you've received this receipt information and ask if I'd 
           // Handle tool response - show the data as widgets
           console.log(`Tool ${msg.tool_name} responded with:`, msg.tool_response);
           
-          const toolData = parseToolResponse(msg.tool_name, msg.tool_response);            if (toolData.hasToolData) {
-              const toolResponseMessage: VoiceMessage = {
-                id: Date.now().toString(),
-                isUser: false,
-                text: `📊 Here's your ${msg.tool_name.replace('get_', '').replace('_', ' ')} data:`,
-                toolData: {
-                  type: toolData.type!,
-                  data: toolData.data
-                }
-              };
-            setMessages(prev => [...prev, toolResponseMessage]);
+          const toolData = parseToolResponse(msg.tool_name, msg.tool_response);
+          if (toolData.hasToolData) {
+            const toolResponseMessage: VoiceMessage = {
+              id: Date.now().toString(),
+              isUser: false,
+              text: `📊 Here's your ${msg.tool_name.replace('get_', '').replace('_', ' ')} data:`,
+              toolData: {
+                type: toolData.type!,
+                data: toolData.data
+              }
+            };
+
+            // For plan previews/finalized plans, replace any existing plan widget
+            if (toolData.type === 'plan') {
+              setMessages(prev => {
+                const withoutExistingPlan = prev.filter(m => !(m.toolData && m.toolData.type === 'plan'));
+                return [...withoutExistingPlan, toolResponseMessage];
+              });
+            } else {
+              setMessages(prev => [...prev, toolResponseMessage]);
+            }
           }
         } else if (msg.mime_type === 'text/plain' && msg.data) {
           setTranscript(msg.data);
@@ -348,7 +358,15 @@ Please acknowledge that you've received this receipt information and ask if I'd 
             };
           }
 
-          setMessages(prev => [...prev, newMessage]);
+          // If this ever contains a plan (future-proof), replace any existing plan widget
+          if (newMessage.toolData && newMessage.toolData.type === 'plan') {
+            setMessages(prev => {
+              const withoutExistingPlan = prev.filter(m => !(m.toolData && m.toolData.type === 'plan'));
+              return [...withoutExistingPlan, newMessage];
+            });
+          } else {
+            setMessages(prev => [...prev, newMessage]);
+          }
         } else if (msg.interrupted) {
           console.log('AI interrupted');
           // Handle AI interruption

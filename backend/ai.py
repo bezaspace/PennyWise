@@ -162,19 +162,29 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                     await websocket.send_text(json.dumps(message))
                     continue
 
-                # Handle function calls
+                # Prefer ADK helpers; fallback to content.parts to avoid duplicates
+                if not function_calls and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                    for part in event.content.parts:
+                        if getattr(part, 'function_call', None):
+                            function_calls.append(part.function_call)
+
+                if not function_responses and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                    for part in event.content.parts:
+                        if getattr(part, 'function_response', None):
+                            function_responses.append(part.function_response)
+
+                # Handle function calls (dedup by id/name+args)
                 if function_calls:
-                    logger.info(f"Processing {len(function_calls)} function calls")
+                    logger.info(f"Processing {len(function_calls)} function calls (deduped)")
+                    seen_calls = set()
                     for call in function_calls:
-                        logger.info(f"Function call object: {call}")
-                        logger.info(f"Function call attributes: {[attr for attr in dir(call) if not attr.startswith('_')]}")
-                        
                         tool_name = getattr(call, 'name', 'unknown')
                         tool_args = getattr(call, 'args', {})
                         tool_id = getattr(call, 'id', None)
-                        
-                        logger.info(f"Tool call - name: {tool_name}, args: {tool_args}, id: {tool_id}")
-                        
+                        key = tool_id or json.dumps({"n": tool_name, "a": tool_args}, sort_keys=True)
+                        if key in seen_calls:
+                            continue
+                        seen_calls.add(key)
                         message = {
                             "mime_type": "tool/call",
                             "tool_name": tool_name,
@@ -182,20 +192,19 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                             "tool_id": tool_id
                         }
                         await websocket.send_text(json.dumps(message))
-                
-                # Handle function responses
+
+                # Handle function responses (dedup by id/name)
                 if function_responses:
-                    logger.info(f"Processing {len(function_responses)} function responses")
+                    logger.info(f"Processing {len(function_responses)} function responses (deduped)")
+                    seen_responses = set()
                     for response in function_responses:
-                        logger.info(f"Function response object: {response}")
-                        logger.info(f"Function response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
-                        
                         tool_name = getattr(response, 'name', 'unknown')
                         tool_response = getattr(response, 'response', {})
                         tool_id = getattr(response, 'id', None)
-                        
-                        logger.info(f"Tool response - name: {tool_name}, response: {tool_response}, id: {tool_id}")
-                        
+                        key = tool_id or tool_name
+                        if key in seen_responses:
+                            continue
+                        seen_responses.add(key)
                         message = {
                             "mime_type": "tool/response",
                             "tool_name": tool_name,
@@ -405,10 +414,13 @@ async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
                     except Exception:
                         pass
 
-                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                # Prefer ADK helpers; fallback to parts only if empty
+                if not function_calls and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
                     for part in event.content.parts:
                         if getattr(part, 'function_call', None):
                             function_calls.append(part.function_call)
+                if not function_responses and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                    for part in event.content.parts:
                         if getattr(part, 'function_response', None):
                             function_responses.append(part.function_response)
 
@@ -420,10 +432,15 @@ async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
                     continue
 
                 if function_calls:
+                    seen_calls = set()
                     for call in function_calls:
                         tool_name = getattr(call, 'name', 'unknown')
                         tool_args = getattr(call, 'args', {})
                         tool_id = getattr(call, 'id', None)
+                        key = tool_id or json.dumps({"n": tool_name, "a": tool_args}, sort_keys=True)
+                        if key in seen_calls:
+                            continue
+                        seen_calls.add(key)
                         await websocket.send_text(json.dumps({
                             "mime_type": "tool/call",
                             "tool_name": tool_name,
@@ -432,10 +449,15 @@ async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
                         }))
 
                 if function_responses:
+                    seen_responses = set()
                     for response in function_responses:
                         tool_name = getattr(response, 'name', 'unknown')
                         tool_response = getattr(response, 'response', {})
                         tool_id = getattr(response, 'id', None)
+                        key = tool_id or tool_name
+                        if key in seen_responses:
+                            continue
+                        seen_responses.add(key)
                         await websocket.send_text(json.dumps({
                             "mime_type": "tool/response",
                             "tool_name": tool_name,

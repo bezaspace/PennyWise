@@ -222,9 +222,6 @@ def get_transactions(user_id: str) -> List[Dict[str, Any]]:
             for t in transactions
         ]
         
-        # Queue tool response for WebSocket sending
-        queue_tool_response("get_transactions", result)
-        
         return result
     finally:
         next(db_gen, None)
@@ -251,9 +248,6 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
             }
             for b in budgets
         ]
-        
-        # Queue tool response for WebSocket sending
-        queue_tool_response("get_budgets", result)
         
         return result
     finally:
@@ -282,8 +276,6 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
             }
             for g in goals
         ]
-        # Queue tool response for WebSocket sending
-        queue_tool_response("get_goals", result)
         return result
     finally:
         next(db_gen, None)
@@ -412,8 +404,7 @@ def emit_plan_preview(plan: dict) -> dict:
     allocations = plan.get("allocations", [])
     if not month or not isinstance(allocations, list):
         raise ValueError("Invalid plan: must include 'month' and 'allocations' list")
-    # Send to client for preview
-    queue_tool_response("emit_plan_preview", plan)
+    # Return plan; rely on ADK function_response to deliver to client
     return plan
 
 def finalize_plan(user_id: str, plan: dict) -> dict:
@@ -519,17 +510,13 @@ def finalize_plan(user_id: str, plan: dict) -> dict:
         db.add(db_plan)
         db.commit()
 
-        # Queue tool responses so the client updates widgets
-        queue_tool_response("get_budgets", applied_budgets)
-        queue_tool_response("get_goals", applied_goals)
-
         summary = {
             "plan_id": plan_id,
             "month": month,
             "budgets_applied": applied_budgets,
             "goals_applied": applied_goals,
         }
-        queue_tool_response("finalize_plan", summary)
+        # Return summary; rely on ADK function_response to deliver to client
         return summary
     finally:
         next(db_gen, None)
