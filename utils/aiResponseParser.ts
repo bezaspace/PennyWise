@@ -1,7 +1,7 @@
 import { Transaction, Budget, Goal } from '@/services/api';
 
 export interface ParsedToolData {
-  type: 'transactions' | 'budgets' | 'goals' | null;
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | null;
   data: any[];
   hasToolData: boolean;
 }
@@ -350,6 +350,25 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
       }
 
       result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'emit_plan_preview':
+      // Planning agent preview tool returns a plan object; wrap in array for widget consumption
+      result.type = 'plan';
+      if (toolData && typeof toolData === 'object') {
+        result.data = [toolData];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'finalize_plan':
+      // Finalization returns summary; let UI continue showing plan preview from prior step.
+      // We still propagate as 'plan' type if it contains a 'plan' field, else leave as no-op.
+      if (toolData && typeof toolData === 'object' && toolData.plan) {
+        result.type = 'plan';
+        result.data = [toolData.plan];
+        result.hasToolData = true;
+      }
       break;
 
     default:

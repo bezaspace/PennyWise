@@ -5,9 +5,10 @@ import { TransactionItem } from './TransactionItem';
 import { BudgetProgress } from './BudgetProgress';
 import { GoalCard } from './GoalCard';
 import { Transaction, Budget, Goal } from '@/services/api';
+import PlanPreview from './PlanPreview';
 
 interface ChatDataWidgetProps {
-  type: 'transactions' | 'budgets' | 'goals';
+  type: 'transactions' | 'budgets' | 'goals' | 'plan';
   data: any[];
   title?: string;
 }
@@ -59,6 +60,15 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
                 </View>
               ))}
             </View>
+          </View>
+        );
+
+      case 'plan':
+        // Expect the data array to contain a single plan object
+        return (
+          <View style={styles.widgetContainer}>
+            <Text style={styles.widgetTitle}>{title || 'Proposed Monthly Plan'}</Text>
+            <PlanPreview plan={Array.isArray(data) ? data[0] : data} />
           </View>
         );
 

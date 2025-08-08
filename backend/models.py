@@ -63,6 +63,20 @@ class GoalDB(Base):
     category = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+# Planning table (optional persistence for plans)
+class PlanDB(Base):
+    __tablename__ = "plans"
+
+    id = Column(String, primary_key=True)
+    month = Column(String, nullable=False)  # e.g., "2025-08"
+    income = Column(Float, nullable=True)
+    savings_rate = Column(Float, nullable=True)  # 0..1
+    emergency_fund_target = Column(Float, nullable=True)
+    allocations_json = Column(String, nullable=False)  # JSON: [{category, amount}]
+    goals_json = Column(String, nullable=True)  # JSON: [{title, target_amount, deadline, current_amount, category}]
+    status = Column(String, nullable=False, default="draft")  # draft | approved
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 # Pydantic Models (API)
 class TransactionBase(BaseModel):
     description: str
@@ -147,6 +161,43 @@ class CategoryUpdate(BaseModel):
     name: Optional[str] = None
 
 class Category(CategoryBase):
+    id: str
+    class Config:
+        from_attributes = True
+
+# ---------- Planning Pydantic Models ----------
+class PlanAllocation(BaseModel):
+    category: str
+    amount: float
+
+class PlanGoal(BaseModel):
+    title: str
+    target_amount: float
+    current_amount: float
+    deadline: str
+    category: str
+
+class PlanBase(BaseModel):
+    month: str
+    income: Optional[float] = None
+    savings_rate: Optional[float] = None
+    emergency_fund_target: Optional[float] = None
+    allocations: list[PlanAllocation]
+    goals: Optional[list[PlanGoal]] = None
+    status: str = "draft"
+
+class PlanCreate(PlanBase):
+    pass
+
+class PlanUpdate(BaseModel):
+    income: Optional[float] = None
+    savings_rate: Optional[float] = None
+    emergency_fund_target: Optional[float] = None
+    allocations: Optional[list[PlanAllocation]] = None
+    goals: Optional[list[PlanGoal]] = None
+    status: Optional[str] = None
+
+class Plan(PlanBase):
     id: str
     class Config:
         from_attributes = True

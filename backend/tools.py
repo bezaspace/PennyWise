@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import TransactionDB, BudgetDB, GoalDB, CategoryDB, TransactionType
+from models import PlanDB
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
@@ -119,7 +120,7 @@ def create_budget_category(category_name: str, limit: float, period: str = "mont
         category = db.query(CategoryDB).filter(CategoryDB.name == category_name).first()
         if not category:
             # Create category with default type
-            category_id = str(int(datetime.now().timestamp() * 1000))
+            category_id = str(uuid.uuid4())
             category = CategoryDB(id=category_id, name=category_name, type="expense")
             db.add(category)
             db.commit()
@@ -131,7 +132,7 @@ def create_budget_category(category_name: str, limit: float, period: str = "mont
             raise ValueError("Budget for this category and period already exists")
 
         # Create budget
-        budget_id = str(int(datetime.now().timestamp() * 1000))
+        budget_id = str(uuid.uuid4())
         db_budget = BudgetDB(
             id=budget_id,
             category=category_name,
@@ -172,7 +173,7 @@ def delete_budget_category(category_name: str) -> dict:
         # Ensure 'Unknown' category exists
         unknown_category = db.query(CategoryDB).filter(CategoryDB.name == "Unknown").first()
         if not unknown_category:
-            unknown_category_id = str(int(datetime.now().timestamp() * 1000))
+            unknown_category_id = str(uuid.uuid4())
             unknown_category = CategoryDB(id=unknown_category_id, name="Unknown", type="expense")
             db.add(unknown_category)
             db.flush()
@@ -379,5 +380,156 @@ def delete_goal(goal_id: str) -> bool:
         db.delete(goal)
         db.commit()
         return True
+    finally:
+        next(db_gen, None)
+
+# ---------------- Planning Tools ----------------
+def _ensure_categories_internal(db: Session, category_names: list[str]) -> list[dict]:
+    ensured = []
+    for name in category_names:
+        if not name:
+            continue
+        existing = db.query(CategoryDB).filter(CategoryDB.name == name).first()
+        if not existing:
+            category_id = str(uuid.uuid4())
+            new_cat = CategoryDB(id=category_id, name=name, type="expense")
+            db.add(new_cat)
+            db.flush()
+            ensured.append({"id": category_id, "name": name, "type": "expense"})
+        else:
+            ensured.append({"id": existing.id, "name": existing.name, "type": existing.type})
+    return ensured
+
+def emit_plan_preview(plan: dict) -> dict:
+    """
+    Queue a plan preview for the voice UI as a tool/response, so the client can render a PlanPreview widget.
+    The plan dict is expected to contain keys: month, income, savings_rate, emergency_fund_target,
+    allocations (list of {category, amount}), goals (optional list of {title, target_amount, current_amount, deadline, category}).
+    """
+    # Minimal validation
+    month = plan.get("month")
+    allocations = plan.get("allocations", [])
+    if not month or not isinstance(allocations, list):
+        raise ValueError("Invalid plan: must include 'month' and 'allocations' list")
+    # Send to client for preview
+    queue_tool_response("emit_plan_preview", plan)
+    return plan
+
+def finalize_plan(user_id: str, plan: dict) -> dict:
+    """
+    Apply a proposed plan by creating/updating budgets and goals. Also persists the plan as approved in PlanDB.
+    Returns a summary with created/updated items.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        month = plan.get("month")
+        if not month:
+            # Default to current month YYYY-MM
+            month = datetime.now().strftime("%Y-%m")
+        allocations = plan.get("allocations", []) or []
+        goals = plan.get("goals", []) or []
+
+        # Ensure categories
+        category_names = [a.get("category") for a in allocations if a.get("category")]
+        _ensure_categories_internal(db, category_names)
+
+        # Upsert budgets for this month (we are not storing month granularity in BudgetDB; assume monthly period)
+        applied_budgets = []
+        for alloc in allocations:
+            category = alloc.get("category")
+            amount = float(alloc.get("amount", 0))
+            if not category:
+                continue
+            existing = db.query(BudgetDB).filter(BudgetDB.category == category, BudgetDB.period == "monthly").first()
+            if existing:
+                existing.limit = amount
+                db.add(existing)
+                db.flush()
+                applied_budgets.append({
+                    "id": existing.id, "category": existing.category, "limit": existing.limit,
+                    "spent": existing.spent, "period": existing.period
+                })
+            else:
+                budget_id = str(uuid.uuid4())
+                db_budget = BudgetDB(id=budget_id, category=category, limit=amount, spent=0.0, period="monthly")
+                db.add(db_budget)
+                db.flush()
+                applied_budgets.append({
+                    "id": db_budget.id, "category": db_budget.category, "limit": db_budget.limit,
+                    "spent": db_budget.spent, "period": db_budget.period
+                })
+
+        # Upsert goals
+        applied_goals = []
+        for g in goals:
+            title = g.get("title")
+            if not title:
+                continue
+            target_amount = float(g.get("target_amount", 0.0))
+            current_amount = float(g.get("current_amount", 0.0))
+            deadline = g.get("deadline") or datetime.now().strftime("%Y-%m-%d")
+            category = g.get("category") or "Savings"
+
+            # Try to find a goal by title (simple heuristic)
+            existing_goal = db.query(GoalDB).filter(GoalDB.title == title).first()
+            if existing_goal:
+                existing_goal.target_amount = target_amount
+                existing_goal.current_amount = current_amount
+                existing_goal.deadline = deadline
+                existing_goal.category = category
+                db.add(existing_goal)
+                db.flush()
+                applied_goals.append({
+                    "id": existing_goal.id, "title": existing_goal.title,
+                    "target_amount": existing_goal.target_amount,
+                    "current_amount": existing_goal.current_amount,
+                    "deadline": existing_goal.deadline,
+                    "category": existing_goal.category,
+                })
+            else:
+                goal_id = str(uuid.uuid4())
+                db_goal = GoalDB(
+                    id=goal_id, title=title, target_amount=target_amount,
+                    current_amount=current_amount, deadline=deadline, category=category
+                )
+                db.add(db_goal)
+                db.flush()
+                applied_goals.append({
+                    "id": db_goal.id, "title": db_goal.title,
+                    "target_amount": db_goal.target_amount,
+                    "current_amount": db_goal.current_amount,
+                    "deadline": db_goal.deadline,
+                    "category": db_goal.category,
+                })
+
+        # Persist approved plan (optional)
+        import json as _json
+        plan_id = str(uuid.uuid4())
+        db_plan = PlanDB(
+            id=plan_id,
+            month=month,
+            income=plan.get("income"),
+            savings_rate=plan.get("savings_rate"),
+            emergency_fund_target=plan.get("emergency_fund_target"),
+            allocations_json=_json.dumps(allocations),
+            goals_json=_json.dumps(goals) if goals else None,
+            status="approved",
+        )
+        db.add(db_plan)
+        db.commit()
+
+        # Queue tool responses so the client updates widgets
+        queue_tool_response("get_budgets", applied_budgets)
+        queue_tool_response("get_goals", applied_goals)
+
+        summary = {
+            "plan_id": plan_id,
+            "month": month,
+            "budgets_applied": applied_budgets,
+            "goals_applied": applied_goals,
+        }
+        queue_tool_response("finalize_plan", summary)
+        return summary
     finally:
         next(db_gen, None)

@@ -42,6 +42,7 @@ interface ReceiptData {
 
 export default function AIChatScreen() {
   const [voiceMode, setVoiceMode] = useState(false);
+  const [plannerMode, setPlannerMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -177,7 +178,13 @@ Would you like me to add this as a transaction to your records? I can also help 
   if (voiceMode) {
     return (
       <SafeAreaView style={globalStyles.safeArea}>
-        <LiveAIVoiceChat onBack={() => setVoiceMode(false)} />
+        <LiveAIVoiceChat 
+          onBack={() => {
+            setVoiceMode(false);
+            setPlannerMode(false);
+          }} 
+          mode={plannerMode ? 'planner' : 'assistant'}
+        />
       </SafeAreaView>
     );
   }
@@ -190,9 +197,20 @@ Would you like me to add this as a transaction to your records? I can also help 
       >
         <View style={styles.header}>
           <Text style={styles.title}>AI Chat</Text>
-          <TouchableOpacity style={styles.voiceToggle} onPress={() => setVoiceMode(true)}>
-            <Text style={styles.voiceToggleText}>🎤 Live Voice Chat</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity 
+              style={styles.voiceToggle} 
+              onPress={() => { setPlannerMode(false); setVoiceMode(true); }}
+            >
+              <Text style={styles.voiceToggleText}>🎤 Live Voice Chat</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.voiceToggle, { backgroundColor: colors.secondary?.[600] || colors.primary[700] }]}
+              onPress={() => { setPlannerMode(true); setVoiceMode(true); }}
+            >
+              <Text style={styles.voiceToggleText}>🗂️ Live Planning</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView 

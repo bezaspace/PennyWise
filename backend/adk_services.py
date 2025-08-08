@@ -2,7 +2,19 @@ from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from database import DATABASE_URL
-from tools import get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal
+from tools import (
+    get_transactions,
+    get_budgets,
+    get_goals,
+    add_transaction,
+    create_budget_category,
+    delete_budget_category,
+    create_goal,
+    update_goal,
+    delete_goal,
+    emit_plan_preview,
+    finalize_plan,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,6 +66,45 @@ financial_agent_text = LlmAgent(
 
 runner_text = Runner(
     agent=financial_agent_text,
+    app_name="PennyWise",
+    session_service=session_service,
+)
+
+# --- Planning Agent & Runner (voice/live) ---
+planning_agent = LlmAgent(
+    model="gemini-2.0-flash-live-001",
+    name="PlanningAgent",
+    instruction="""You are a financial planning assistant for monthly budgeting.
+You will:
+- Greet the user and explain you'll ask a few questions to create a monthly plan.
+- Ask clarifying questions: monthly net income, fixed obligations, savings target (amount or %), priorities (emergency fund, debt, travel), and typical spending categories.
+- Use tools to read context if the user asks about current budgets or goals.
+- When you have enough info, compute a proposal with allocations per category (monthly amounts) and optional goals. Then CALL the emit_plan_preview tool with a structured plan object (month, income, savings_rate, emergency_fund_target, allocations, goals).
+- Iterate on feedback and adjust allocations/goals, calling emit_plan_preview each time you update the plan.
+- ONLY after explicit approval (e.g., the user says "Approve this plan"), CALL finalize_plan with the current plan. Do not finalize before explicit consent.
+- After finalize, summarize what changed.
+
+Important:
+- Never ask for user_id; it's provided by the backend.
+- Keep responses concise and conversational. Summarize numbers clearly.
+- For allocations, prefer well-known categories already in use if possible.
+""",
+    tools=[
+        get_transactions,
+        get_budgets,
+        get_goals,
+        emit_plan_preview,
+        finalize_plan,
+        create_budget_category,
+        delete_budget_category,
+        create_goal,
+        update_goal,
+        delete_goal,
+    ],
+)
+
+planning_runner = Runner(
+    agent=planning_agent,
     app_name="PennyWise",
     session_service=session_service,
 )
