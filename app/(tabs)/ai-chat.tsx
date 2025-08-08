@@ -43,6 +43,7 @@ interface ReceiptData {
 export default function AIChatScreen() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [plannerMode, setPlannerMode] = useState(false);
+  const [investMode, setInvestMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -182,8 +183,9 @@ Would you like me to add this as a transaction to your records? I can also help 
           onBack={() => {
             setVoiceMode(false);
             setPlannerMode(false);
+            setInvestMode(false);
           }} 
-          mode={plannerMode ? 'planner' : 'assistant'}
+          mode={plannerMode ? 'planner' : investMode ? 'invest' : 'assistant'}
         />
       </SafeAreaView>
     );
@@ -209,6 +211,12 @@ Would you like me to add this as a transaction to your records? I can also help 
               onPress={() => { setPlannerMode(true); setVoiceMode(true); }}
             >
               <Text style={styles.voiceToggleText}>🗂️ Live Planning</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.voiceToggle, { backgroundColor: colors.success?.[600] || colors.primary[700] }]}
+              onPress={() => { setPlannerMode(false); setInvestMode(true); setVoiceMode(true); }}
+            >
+              <Text style={styles.voiceToggleText}>📈 Live Investments</Text>
             </TouchableOpacity>
           </View>
         </View>

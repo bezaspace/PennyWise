@@ -29,7 +29,7 @@ interface ReceiptData {
 
 const DEFAULT_WS_URL = `ws://${window.location.hostname}:8000/api/ai/voice/ws/user_123`;
 
-export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assistant' | 'planner' }: { onBack: () => void; mode?: 'assistant' | 'planner' }) {
+export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assistant' | 'planner' | 'invest' }: { onBack: () => void; mode?: 'assistant' | 'planner' | 'invest' }) {
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
@@ -283,7 +283,9 @@ Please acknowledge that you've received this receipt information and ask if I'd 
     setConnectionStatus('connecting');
     const wsUrl = mode === 'planner'
       ? `ws://${window.location.hostname}:8000/api/ai/planner/voice/ws/user_123`
-      : DEFAULT_WS_URL;
+      : mode === 'invest'
+        ? `ws://${window.location.hostname}:8000/api/ai/invest/voice/ws/user_123`
+        : DEFAULT_WS_URL;
     ws.current = new WebSocket(wsUrl);
     
     ws.current.onopen = () => {

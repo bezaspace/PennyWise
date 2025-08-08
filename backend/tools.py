@@ -2,13 +2,23 @@ import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import TransactionDB, BudgetDB, GoalDB, CategoryDB, TransactionType
-from models import PlanDB
+from models import (
+    TransactionDB,
+    BudgetDB,
+    GoalDB,
+    CategoryDB,
+    TransactionType,
+    PlanDB,
+    InvestmentTradeDB,
+    WatchlistItemDB,
+    TradeType,
+)
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
 import logging
 from utils.time_utils import get_current_month_string, get_current_date_iso
+from stock_service import get_quote as get_symbol_quote, get_quotes as get_symbol_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -548,5 +558,305 @@ def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
             "goals": goals,
             "status": plan_row.status,
         }
+    finally:
+        next(db_gen, None)
+
+# ---------------- Investment Tools ----------------
+def _compute_holdings_internal(db: Session) -> tuple[list[dict], dict[str, dict]]:
+    """
+    Compute current holdings from all trades in DB.
+    Returns (holdings_list, by_symbol_map minimal data)
+    """
+    trades = (
+        db.query(InvestmentTradeDB)
+        .order_by(InvestmentTradeDB.date.asc(), InvestmentTradeDB.created_at.asc())
+        .all()
+    )
+    by_symbol: dict[str, dict] = {}
+    for t in trades:
+        sym = (t.symbol or "").upper()
+        if not sym:
+            continue
+        if sym not in by_symbol:
+            by_symbol[sym] = {
+                "symbol": sym,
+                "company_name": t.company_name,
+                "quantity": 0.0,
+                "cost_basis_total": 0.0,
+            }
+        entry = by_symbol[sym]
+        if t.type == TradeType.buy:
+            entry["quantity"] += float(t.quantity)
+            entry["cost_basis_total"] += float(t.price) * float(t.quantity) + float(
+                t.fees or 0.0
+            )
+        else:
+            entry["quantity"] -= float(t.quantity)
+            if entry["quantity"] < 0:
+                entry["quantity"] = round(entry["quantity"], 6)
+        if t.company_name:
+            entry["company_name"] = t.company_name
+
+    holdings: list[dict] = []
+    symbols = [s for s, d in by_symbol.items() if d["quantity"] > 0]
+    quotes = get_symbol_quotes(symbols) if symbols else {}
+    for sym, data in by_symbol.items():
+        qty = float(data["quantity"])
+        if qty <= 0:
+            continue
+        cost_basis_total = (
+            float(data["cost_basis_total"]) if data["cost_basis_total"] > 0 else 0.0
+        )
+        avg_cost = (cost_basis_total / qty) if qty > 0 and cost_basis_total > 0 else 0.0
+        q = quotes.get(sym)
+        current_price = float(q["price"]) if q else 0.0
+        value = qty * current_price
+        unrealized = (current_price - avg_cost) * qty
+        unrealized_pct = (
+            ((current_price - avg_cost) / avg_cost * 100.0) if avg_cost > 0 else 0.0
+        )
+        holdings.append(
+            {
+                "symbol": sym,
+                "company_name": data.get("company_name"),
+                "quantity": qty,
+                "average_cost": round(avg_cost, 6),
+                "current_price": round(current_price, 6),
+                "value": round(value, 2),
+                "unrealized_gain": round(unrealized, 2),
+                "unrealized_gain_percent": round(unrealized_pct, 4),
+            }
+        )
+    return holdings, by_symbol
+
+
+def get_investment_holdings(user_id: str) -> list[dict]:
+    """
+    Returns the user's current equity holdings aggregated from trades with real-time quotes.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        holdings, _ = _compute_holdings_internal(db)
+        holdings.sort(key=lambda h: h.get("value", 0.0), reverse=True)
+        return holdings
+    finally:
+        next(db_gen, None)
+
+
+def get_portfolio_summary(user_id: str) -> dict:
+    """
+    Returns a summary of the user's portfolio: total value, day change, overall gain, and timestamps.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        holdings, _ = _compute_holdings_internal(db)
+        symbols = [h["symbol"] for h in holdings]
+        quotes = get_symbol_quotes(symbols) if symbols else {}
+
+        total_value = 0.0
+        overall_gain = 0.0
+        total_prev_value = 0.0
+        for h in holdings:
+            sym = h["symbol"]
+            qty = float(h["quantity"])
+            avg_cost = float(h["average_cost"]) if h.get("average_cost") else 0.0
+            q = quotes.get(sym)
+            current_price = float(q["price"]) if q else 0.0
+            prev_close = float(q["prev_close"]) if q else 0.0
+            total_value += qty * current_price
+            total_prev_value += qty * prev_close
+            overall_gain += (current_price - avg_cost) * qty
+
+        day_change = total_value - total_prev_value
+        day_change_pct = (day_change / total_prev_value * 100.0) if total_prev_value > 0 else 0.0
+        overall_gain_pct = (
+            (overall_gain / (total_value - overall_gain) * 100.0)
+            if (total_value - overall_gain) > 0
+            else 0.0
+        )
+        last_updated = 0.0
+        for sym in symbols:
+            q = quotes.get(sym)
+            if q:
+                last_updated = max(last_updated, float(q.get("last_updated", 0.0)))
+
+        return {
+            "total_value": round(total_value, 2),
+            "day_change": round(day_change, 2),
+            "day_change_percent": round(day_change_pct, 4),
+            "overall_gain": round(overall_gain, 2),
+            "overall_gain_percent": round(overall_gain_pct, 4),
+            "last_updated": last_updated,
+        }
+    finally:
+        next(db_gen, None)
+
+
+def list_trades(user_id: str, limit: int) -> list[dict]:
+    """
+    Returns list of trades, most recent first. Optional limit to top N.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        q = db.query(InvestmentTradeDB).order_by(InvestmentTradeDB.created_at.desc())
+        if limit and limit > 0:
+            q = q.limit(limit)
+        items = q.all()
+        return [
+            {
+                "id": t.id,
+                "symbol": t.symbol,
+                "company_name": t.company_name,
+                "type": t.type.value,
+                "quantity": float(t.quantity),
+                "price": float(t.price),
+                "fees": float(t.fees or 0.0),
+                "date": t.date,
+            }
+            for t in items
+        ]
+    finally:
+        next(db_gen, None)
+
+
+def create_trade(
+    user_id: str,
+    symbol: str,
+    type: str,
+    quantity: float,
+    price: float,
+    fees: float,
+    date: str,
+    company_name: str,
+) -> dict:
+    """
+    Creates a trade (buy/sell). Validates sells against owned quantity.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        symbol_u = (symbol or "").upper().strip()
+        if not symbol_u:
+            raise ValueError("Symbol is required")
+        if quantity <= 0 or price <= 0:
+            raise ValueError("Quantity and price must be positive")
+
+        # Validate sell
+        if type == "sell":
+            trades = (
+                db.query(InvestmentTradeDB)
+                .filter(InvestmentTradeDB.symbol == symbol_u)
+                .order_by(InvestmentTradeDB.date.asc(), InvestmentTradeDB.created_at.asc())
+                .all()
+            )
+            owned = 0.0
+            for t in trades:
+                if t.type == TradeType.buy:
+                    owned += float(t.quantity)
+                else:
+                    owned -= float(t.quantity)
+            if quantity > owned + 1e-9:
+                raise ValueError("Cannot sell more shares than owned")
+
+        trade_id = str(uuid.uuid4())
+        db_trade = InvestmentTradeDB(
+            id=trade_id,
+            symbol=symbol_u,
+            company_name=company_name or None,
+            type=TradeType(type),
+            quantity=float(quantity),
+            price=float(price),
+            fees=float(fees),
+            date=date or get_current_date_iso(),
+        )
+        db.add(db_trade)
+        db.commit()
+        db.refresh(db_trade)
+        return {
+            "id": db_trade.id,
+            "symbol": db_trade.symbol,
+            "company_name": db_trade.company_name,
+            "type": db_trade.type.value,
+            "quantity": float(db_trade.quantity),
+            "price": float(db_trade.price),
+            "fees": float(db_trade.fees),
+            "date": db_trade.date,
+        }
+    finally:
+        next(db_gen, None)
+
+
+def get_quote(symbol: str) -> dict:
+    """
+    Returns a real-time quote for a symbol.
+    """
+    q = get_symbol_quote(symbol)
+    if not q:
+        raise ValueError("Quote not available")
+    return q
+
+
+def get_watchlist(user_id: str) -> list[dict]:
+    """
+    Returns current watchlist items.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        items = db.query(WatchlistItemDB).order_by(WatchlistItemDB.created_at.desc()).all()
+        return [
+            {"id": i.id, "symbol": i.symbol, "company_name": i.company_name}
+            for i in items
+        ]
+    finally:
+        next(db_gen, None)
+
+
+def add_watchlist_item(user_id: str, symbol: str, company_name: str) -> dict:
+    """
+    Adds a symbol to watchlist if not present.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        symbol_u = (symbol or "").upper().strip()
+        if not symbol_u:
+            raise ValueError("Symbol is required")
+        existing = db.query(WatchlistItemDB).filter(WatchlistItemDB.symbol == symbol_u).first()
+        if existing:
+            return {
+                "id": existing.id,
+                "symbol": existing.symbol,
+                "company_name": existing.company_name,
+            }
+        item = WatchlistItemDB(id=str(uuid.uuid4()), symbol=symbol_u, company_name=company_name)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return {"id": item.id, "symbol": item.symbol, "company_name": item.company_name}
+    finally:
+        next(db_gen, None)
+
+
+def delete_watchlist_item(identifier: str) -> dict:
+    """
+    Deletes a watchlist item by id or symbol.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        item = (
+            db.query(WatchlistItemDB)
+            .filter((WatchlistItemDB.id == identifier) | (WatchlistItemDB.symbol == identifier.upper()))
+            .first()
+        )
+        if not item:
+            raise ValueError("Watchlist item not found")
+        db.delete(item)
+        db.commit()
+        return {"message": "Watchlist item deleted"}
     finally:
         next(db_gen, None)

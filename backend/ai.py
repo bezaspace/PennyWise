@@ -18,7 +18,7 @@ from google.adk.agents import LiveRequestQueue
 import json
 import uuid
 from database import get_db
-from adk_services import runner, runner_text, session_service, planning_runner
+from adk_services import runner, runner_text, session_service, planning_runner, investment_runner
 from tools import set_websocket_for_tools, clear_websocket_for_tools, send_pending_tool_messages
 from receipt_service import receipt_service
 
@@ -536,6 +536,233 @@ async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
                 logger.error(f"Planning WebSocket task error: {e}")
     except Exception as e:
         logger.error(f"Planning WebSocket connection error: {e}")
+    finally:
+        clear_websocket_for_tools()
+        try:
+            live_request_queue.close()
+        except Exception:
+            pass
+        try:
+            if websocket.client_state.CONNECTED:
+                await websocket.close()
+        except Exception:
+            pass
+
+
+# --- Live Investment Voice Chat WebSocket Endpoint ---
+@router.websocket("/invest/voice/ws/{user_id}")
+async def investment_voice_chat_ws(websocket: WebSocket, user_id: str):
+    """WebSocket endpoint for live AI voice chat dedicated to investments."""
+    await websocket.accept()
+    logger.info(f"Investment voice chat WebSocket connected for user: {user_id}")
+
+    set_websocket_for_tools(websocket)
+    session_id = f"invest_session_{uuid.uuid4()}"
+
+    try:
+        session = await session_service.create_session(
+            app_name="PennyWise", user_id=user_id, session_id=session_id
+        )
+        logger.info(f"Investment session created: {session_id}")
+    except Exception as create_error:
+        logger.error(f"Failed to create investment session: {create_error}")
+        await websocket.close(code=1011, reason="Session creation failed")
+        return
+
+    try:
+        run_config = RunConfig(
+            response_modalities=["AUDIO"],
+            realtime_input_config={
+                "automatic_activity_detection": {
+                    "disabled": False,
+                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
+                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    "prefix_padding_ms": 200,
+                    "silence_duration_ms": 600,
+                }
+            },
+        )
+
+        live_request_queue = LiveRequestQueue()
+        live_events = investment_runner.run_live(
+            session=session, live_request_queue=live_request_queue, run_config=run_config
+        )
+        logger.info("Investment live session started")
+    except Exception as e:
+        logger.error(f"Failed to start investment live session: {e}")
+        await websocket.close(code=1011, reason="Live session setup failed")
+        return
+
+    async def agent_to_client():
+        try:
+            async for event in live_events:
+                await send_pending_tool_messages()
+
+                function_calls = []
+                function_responses = []
+
+                if hasattr(event, "get_function_calls"):
+                    try:
+                        function_calls = event.get_function_calls()
+                    except Exception:
+                        pass
+                if hasattr(event, "get_function_responses"):
+                    try:
+                        function_responses = event.get_function_responses()
+                    except Exception:
+                        pass
+
+                if getattr(event, "turn_complete", False):
+                    await websocket.send_text(
+                        json.dumps({"turn_complete": True, "interrupted": False})
+                    )
+                    continue
+                if getattr(event, "interrupted", False):
+                    await websocket.send_text(
+                        json.dumps({"turn_complete": False, "interrupted": True})
+                    )
+                    continue
+
+                if function_calls:
+                    seen_calls = set()
+                    for call in function_calls:
+                        tool_name = getattr(call, "name", "unknown")
+                        tool_args = getattr(call, "args", {})
+                        tool_id = getattr(call, "id", None)
+                        key = tool_id or json.dumps({"n": tool_name, "a": tool_args}, sort_keys=True)
+                        if key in seen_calls:
+                            continue
+                        seen_calls.add(key)
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "mime_type": "tool/call",
+                                    "tool_name": tool_name,
+                                    "tool_args": tool_args,
+                                    "tool_id": tool_id,
+                                }
+                            )
+                        )
+
+                if function_responses:
+                    seen_responses = set()
+                    for response in function_responses:
+                        tool_name = getattr(response, "name", "unknown")
+                        tool_response = getattr(response, "response", {})
+                        tool_id = getattr(response, "id", None)
+                        key = tool_id or tool_name
+                        if key in seen_responses:
+                            continue
+                        seen_responses.add(key)
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "mime_type": "tool/response",
+                                    "tool_name": tool_name,
+                                    "tool_response": tool_response,
+                                    "tool_id": tool_id,
+                                }
+                            )
+                        )
+
+                if (
+                    hasattr(event, "content")
+                    and event.content
+                    and hasattr(event.content, "parts")
+                    and event.content.parts
+                ):
+                    part = event.content.parts[0]
+                    if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith(
+                        "audio/pcm"
+                    ):
+                        audio_data = part.inline_data.data
+                        if audio_data:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "mime_type": "audio/pcm",
+                                        "data": base64.b64encode(audio_data).decode("ascii"),
+                                    }
+                                )
+                            )
+                        continue
+                    if getattr(part, "text", None):
+                        text_content = part.text.strip()
+                        if text_content:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "mime_type": "text/plain",
+                                        "data": text_content,
+                                        "partial": getattr(event, "partial", False),
+                                    }
+                                )
+                            )
+        except Exception as e:
+            logger.error(f"Error in investment agent_to_client: {e}")
+            try:
+                await websocket.send_text(
+                    json.dumps(
+                        {"error": True, "message": "Connection error occurred"}
+                    )
+                )
+            except:
+                pass
+
+    async def client_to_agent():
+        try:
+            while True:
+                message_json = await websocket.receive_text()
+                message = json.loads(message_json)
+
+                if message.get("type") == "interrupt":
+                    try:
+                        if hasattr(live_request_queue, "cancel"):
+                            live_request_queue.cancel()
+                        live_request_queue.send_realtime()
+                    except Exception:
+                        pass
+                    continue
+
+                mime_type = message.get("mime_type")
+                data = message.get("data")
+                if mime_type == "text/plain" and data:
+                    content = types.Content(
+                        role="user", parts=[types.Part.from_text(text=data)]
+                    )
+                    live_request_queue.send_content(content=content)
+                elif mime_type == "audio/pcm" and data:
+                    try:
+                        decoded_data = base64.b64decode(data)
+                        live_request_queue.send_realtime(
+                            types.Blob(
+                                data=decoded_data, mime_type="audio/pcm;rate=16000"
+                            )
+                        )
+                    except Exception:
+                        continue
+        except Exception:
+            return
+
+    try:
+        agent_task = asyncio.create_task(agent_to_client())
+        client_task = asyncio.create_task(client_to_agent())
+        done, pending = await asyncio.wait(
+            [agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION
+        )
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        for task in done:
+            try:
+                await task
+            except Exception as e:
+                logger.error(f"Investment WebSocket task error: {e}")
+    except Exception as e:
+        logger.error(f"Investment WebSocket connection error: {e}")
     finally:
         clear_websocket_for_tools()
         try:

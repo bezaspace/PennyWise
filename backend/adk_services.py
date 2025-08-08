@@ -1,4 +1,6 @@
 from google.adk.agents import LlmAgent
+from google.adk.tools import google_search
+from google.adk.tools import agent_tool
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from database import DATABASE_URL
@@ -15,6 +17,15 @@ from tools import (
     emit_plan_preview,
     finalize_plan,
     get_latest_plan,
+    # Investment tools
+    get_investment_holdings,
+    get_portfolio_summary,
+    list_trades,
+    create_trade,
+    get_quote,
+    get_watchlist,
+    add_watchlist_item,
+    delete_watchlist_item,
 )
 import logging
 
@@ -110,6 +121,69 @@ Important:
 
 planning_runner = Runner(
     agent=planning_agent,
+    app_name="PennyWise",
+    session_service=session_service,
+)
+
+# --- Investment Agent Team (Coordinator + Specialists) & Runner ---
+# Specialist 1: Market Research with built-in Google Search (grounded, up-to-date)
+market_research_agent = LlmAgent(
+    model="gemini-2.5-flash",
+    name="MarketResearchAgent",
+    description="Finds and summarizes latest company news, earnings, and market context using Google Search.",
+    instruction=(
+        "You are a market research specialist.\n"
+        "- Use google_search to find recent news, earnings reports, analyst notes, and key events for tickers or companies mentioned.\n"
+        "- Prefer trustworthy sources. Summarize concisely with citations if available.\n"
+        "- Do not make portfolio-specific recommendations; only provide objective context and facts."
+    ),
+    tools=[google_search],
+)
+
+# Specialist 2: Portfolio Insight with DB-backed tools
+portfolio_insight_agent = LlmAgent(
+    model="gemini-2.5-flash",
+    name="PortfolioInsightAgent",
+    description="Analyzes user's portfolio, holdings, trades, and watchlist to surface insights and personalized metrics.",
+    instruction=(
+        "You are a portfolio analysis specialist.\n"
+        "- Use tools to read holdings, portfolio summary, recent trades, watchlist, and quotes.\n"
+        "- Provide exposure by sector/ticker, concentration risks, winners/laggards, and simple what-if checks (verbally).\n"
+        "- You may add symbols to the watchlist or record trades when instructed.\n"
+        "- Never ask for user_id."
+    ),
+    tools=[
+        get_investment_holdings,
+        get_portfolio_summary,
+        list_trades,
+        get_watchlist,
+        get_quote,
+        add_watchlist_item,
+        delete_watchlist_item,
+        create_trade,
+    ],
+)
+
+# Coordinator: InvestmentAgent invokes specialists explicitly via AgentTool
+market_research_tool = agent_tool.AgentTool(agent=market_research_agent)
+portfolio_insight_tool = agent_tool.AgentTool(agent=portfolio_insight_agent)
+
+investment_agent = LlmAgent(
+    model="gemini-2.0-flash-live-001",
+    name="InvestmentAgent",
+    description="Coordinator for investment Q&A and advice; delegates research vs. portfolio tasks to specialists.",
+    instruction=(
+        "You are the coordinator for investment advice.\n"
+        "- If the user asks about latest news, earnings, or external info about a stock/index/sector, call the MarketResearchAgent tool.\n"
+        "- If the user asks about their holdings, performance, gains, trades, watchlist, or quotes, call the PortfolioInsightAgent tool.\n"
+        "- Combine specialist outputs into tailored advice considering diversification, risk, time horizon (if inferred), and concentration.\n"
+        "- Be explicit about uncertainty and avoid guarantees. Offer next steps (rebalance, add/remove watchlist, or set alerts/goals)."
+    ),
+    tools=[market_research_tool, portfolio_insight_tool],
+)
+
+investment_runner = Runner(
+    agent=investment_agent,
     app_name="PennyWise",
     session_service=session_service,
 )
