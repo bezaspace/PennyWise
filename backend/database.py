@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models import Base, TransactionDB, BudgetDB, GoalDB, CategoryDB, TransactionType, BudgetPeriod, CategoryType
+from models import InvestmentTradeDB, WatchlistItemDB, TradeType
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
@@ -197,6 +198,21 @@ def seed_database():
         db.add_all(transactions)
         db.add_all(budgets)
         db.add_all(goals)
+        # Optional: seed a couple of trades and watchlist items for demo
+        try:
+            demo_trades = []
+            from datetime import datetime as _dt
+            now_iso = _dt.now().isoformat()
+            demo_trades.append(InvestmentTradeDB(id="t1", symbol="AAPL", company_name="Apple Inc.", type=TradeType.buy, quantity=5.0, price=190.0, fees=0.0, date=now_iso))
+            demo_trades.append(InvestmentTradeDB(id="t2", symbol="GOOGL", company_name="Alphabet Inc.", type=TradeType.buy, quantity=2.0, price=2800.0, fees=0.0, date=now_iso))
+            db.add_all(demo_trades)
+            demo_watch = [
+                WatchlistItemDB(id="w1", symbol="MSFT", company_name="Microsoft Corporation"),
+                WatchlistItemDB(id="w2", symbol="TSLA", company_name="Tesla, Inc."),
+            ]
+            db.add_all(demo_watch)
+        except Exception:
+            pass
         db.commit()
         
         print("Database seeded with mock data successfully!")

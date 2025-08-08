@@ -77,6 +77,35 @@ class PlanDB(Base):
     status = Column(String, nullable=False, default="draft")  # draft | approved
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+# ---------------- Investments (Trades & Watchlist) ----------------
+
+class TradeType(enum.Enum):
+    buy = "buy"
+    sell = "sell"
+
+
+class InvestmentTradeDB(Base):
+    __tablename__ = "investment_trades"
+
+    id = Column(String, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    company_name = Column(String, nullable=True)
+    type = Column(Enum(TradeType), nullable=False)
+    quantity = Column(Float, nullable=False)  # allow fractional shares
+    price = Column(Float, nullable=False)
+    fees = Column(Float, nullable=False, default=0.0)
+    date = Column(String, nullable=False)  # ISO string format
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class WatchlistItemDB(Base):
+    __tablename__ = "watchlist_items"
+
+    id = Column(String, primary_key=True)
+    symbol = Column(String, nullable=False, unique=True)
+    company_name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 # Pydantic Models (API)
 class TransactionBase(BaseModel):
     description: str
@@ -201,3 +230,72 @@ class Plan(PlanBase):
     id: str
     class Config:
         from_attributes = True
+
+# ---------------- Pydantic Models for Investments ----------------
+
+class InvestmentTradeBase(BaseModel):
+    symbol: str
+    company_name: Optional[str] = None
+    type: Literal["buy", "sell"]
+    quantity: float
+    price: float
+    fees: Optional[float] = 0.0
+    date: str
+
+
+class InvestmentTradeCreate(InvestmentTradeBase):
+    pass
+
+
+class InvestmentTradeUpdate(BaseModel):
+    # Disallow changing symbol and type for simplicity in MVP
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    fees: Optional[float] = None
+    date: Optional[str] = None
+
+
+class InvestmentTrade(InvestmentTradeBase):
+    id: str
+
+    class Config:
+        from_attributes = True
+
+
+class Holding(BaseModel):
+    symbol: str
+    company_name: Optional[str] = None
+    quantity: float
+    average_cost: float
+    current_price: float
+    value: float
+    unrealized_gain: float
+    unrealized_gain_percent: float
+
+
+class PortfolioSummary(BaseModel):
+    total_value: float
+    day_change: float
+    day_change_percent: float
+    overall_gain: float
+    overall_gain_percent: float
+    last_updated: float
+
+
+class WatchlistItem(BaseModel):
+    id: str
+    symbol: str
+    company_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class Quote(BaseModel):
+    symbol: str
+    company_name: Optional[str] = None
+    price: float
+    prev_close: float
+    change: float
+    change_percent: float
+    last_updated: float

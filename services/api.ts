@@ -204,6 +204,125 @@ class ApiService {
     return response.advice;
   }
 
+  // -------- Investments --------
+  async getInvestmentsSummary(): Promise<{
+    total_value: number;
+    day_change: number;
+    day_change_percent: number;
+    overall_gain: number;
+    overall_gain_percent: number;
+    last_updated: number;
+  }> {
+    return this.apiRequest(`/api/investments/summary`);
+  }
+
+  async getHoldings(sort: 'value' | 'gain' | 'alpha' = 'value'): Promise<Array<{
+    symbol: string;
+    company_name?: string;
+    quantity: number;
+    average_cost: number;
+    current_price: number;
+    value: number;
+    unrealized_gain: number;
+    unrealized_gain_percent: number;
+  }>> {
+    return this.apiRequest(`/api/investments/holdings?sort=${sort}`);
+  }
+
+  async getTrades(limit?: number): Promise<Array<{
+    id: string;
+    symbol: string;
+    company_name?: string;
+    type: 'buy' | 'sell';
+    quantity: number;
+    price: number;
+    fees?: number;
+    date: string;
+  }>> {
+    const url = typeof limit === 'number' ? `/api/investments/trades?limit=${limit}` : `/api/investments/trades`;
+    return this.apiRequest(url);
+  }
+
+  async addTrade(trade: {
+    symbol: string;
+    company_name?: string;
+    type: 'buy' | 'sell';
+    quantity: number;
+    price: number;
+    fees?: number;
+    date: string;
+  }): Promise<{
+    id: string;
+    symbol: string;
+    company_name?: string;
+    type: 'buy' | 'sell';
+    quantity: number;
+    price: number;
+    fees?: number;
+    date: string;
+  }> {
+    return this.apiRequest(`/api/investments/trades`, {
+      method: 'POST',
+      body: JSON.stringify(trade),
+    });
+  }
+
+  async updateTrade(id: string, updates: Partial<{
+    quantity: number;
+    price: number;
+    fees: number;
+    date: string;
+  }>): Promise<{
+    id: string;
+    symbol: string;
+    company_name?: string;
+    type: 'buy' | 'sell';
+    quantity: number;
+    price: number;
+    fees?: number;
+    date: string;
+  }> {
+    return this.apiRequest(`/api/investments/trades/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteTrade(id: string): Promise<void> {
+    await this.apiRequest(`/api/investments/trades/${id}`, { method: 'DELETE' });
+  }
+
+  async removeHolding(symbol: string): Promise<void> {
+    await this.apiRequest(`/api/investments/holdings/${symbol}`, { method: 'DELETE' });
+  }
+
+  async getWatchlist(): Promise<Array<{ id: string; symbol: string; company_name?: string }>> {
+    return this.apiRequest(`/api/investments/watchlist`);
+  }
+
+  async addToWatchlist(item: { symbol: string; company_name?: string }): Promise<{ id: string; symbol: string; company_name?: string }> {
+    return this.apiRequest(`/api/investments/watchlist`, {
+      method: 'POST',
+      body: JSON.stringify(item),
+    });
+  }
+
+  async removeFromWatchlist(idOrSymbol: string): Promise<void> {
+    await this.apiRequest(`/api/investments/watchlist/${idOrSymbol}`, { method: 'DELETE' });
+  }
+
+  async getQuote(symbol: string): Promise<{
+    symbol: string;
+    company_name?: string;
+    price: number;
+    prev_close: number;
+    change: number;
+    change_percent: number;
+    last_updated: number;
+  }> {
+    return this.apiRequest(`/api/investments/quote/${symbol}`);
+  }
+
   async uploadReceipt(imageUri: string): Promise<{
     success: boolean;
     data?: any;
