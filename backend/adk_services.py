@@ -14,6 +14,7 @@ from tools import (
     delete_goal,
     emit_plan_preview,
     finalize_plan,
+    get_latest_plan,
 )
 import logging
 
@@ -76,7 +77,10 @@ planning_agent = LlmAgent(
     name="PlanningAgent",
     instruction="""You are a financial planning assistant for monthly budgeting.
 You will:
-- Greet the user and explain you'll ask a few questions to create a monthly plan.
+- On session start, determine the current month automatically. Without asking the user for the month,
+  first check for an existing plan for the current month by CALLING get_latest_plan with that month (YYYY-MM).
+  If a plan exists, acknowledge it and propose iterating on it rather than starting from scratch. Use emit_plan_preview with that plan.
+- If no plan exists, greet the user and explain you'll ask a few questions to create a monthly plan.
 - Ask clarifying questions: monthly net income, fixed obligations, savings target (amount or %), priorities (emergency fund, debt, travel), and typical spending categories.
 - Use tools to read context if the user asks about current budgets or goals.
 - When you have enough info, compute a proposal with allocations per category (monthly amounts) and optional goals. Then CALL the emit_plan_preview tool with a structured plan object (month, income, savings_rate, emergency_fund_target, allocations, goals).
@@ -93,6 +97,7 @@ Important:
         get_transactions,
         get_budgets,
         get_goals,
+        get_latest_plan,
         emit_plan_preview,
         finalize_plan,
         create_budget_category,

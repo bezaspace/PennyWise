@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 import asyncio
 import json
 import logging
+from utils.time_utils import get_current_month_string, get_current_date_iso
 
 logger = logging.getLogger(__name__)
 
@@ -425,8 +426,7 @@ def finalize_plan(user_id: str, plan: dict) -> dict:
     try:
         month = plan.get("month")
         if not month:
-            # Default to current month YYYY-MM
-            month = datetime.now().strftime("%Y-%m")
+            month = get_current_month_string()
         allocations = plan.get("allocations", []) or []
         goals = plan.get("goals", []) or []
 
@@ -468,7 +468,7 @@ def finalize_plan(user_id: str, plan: dict) -> dict:
                 continue
             target_amount = float(g.get("target_amount", 0.0))
             current_amount = float(g.get("current_amount", 0.0))
-            deadline = g.get("deadline") or datetime.now().strftime("%Y-%m-%d")
+            deadline = g.get("deadline") or get_current_date_iso()
             category = g.get("category") or "Savings"
 
             # Try to find a goal by title (simple heuristic)
@@ -531,5 +531,35 @@ def finalize_plan(user_id: str, plan: dict) -> dict:
         }
         queue_tool_response("finalize_plan", summary)
         return summary
+    finally:
+        next(db_gen, None)
+
+def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
+    """
+    Retrieve the most recent plan. If month is provided (e.g., "2025-08"),
+    return the latest plan for that month. Returns a normalized plan dict or None.
+    """
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        query = db.query(PlanDB)
+        if month:
+            query = query.filter(PlanDB.month == month)
+        plan_row = query.order_by(PlanDB.created_at.desc()).first()
+        if not plan_row:
+            return None
+        import json as _json
+        allocations = _json.loads(plan_row.allocations_json) if plan_row.allocations_json else []
+        goals = _json.loads(plan_row.goals_json) if plan_row.goals_json else []
+        return {
+            "id": plan_row.id,
+            "month": plan_row.month,
+            "income": plan_row.income,
+            "savings_rate": plan_row.savings_rate,
+            "emergency_fund_target": plan_row.emergency_fund_target,
+            "allocations": allocations,
+            "goals": goals,
+            "status": plan_row.status,
+        }
     finally:
         next(db_gen, None)
