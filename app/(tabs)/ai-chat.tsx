@@ -184,8 +184,7 @@ Would you like me to add this as a transaction to your records? I can also help 
             setVoiceMode(false);
             setPlannerMode(false);
             setInvestMode(false);
-          }} 
-          mode={plannerMode ? 'planner' : investMode ? 'invest' : 'assistant'}
+          }}
         />
       </SafeAreaView>
     );

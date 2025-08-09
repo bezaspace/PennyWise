@@ -9,14 +9,18 @@ from tools import (
     get_budgets,
     get_goals,
     add_transaction,
+    add_transaction_payload,
     create_budget_category,
+    create_budget_category_payload,
     delete_budget_category,
     create_goal,
     update_goal,
     delete_goal,
     emit_plan_preview,
     finalize_plan,
+    finalize_plan_payload,
     get_latest_plan,
+    get_latest_plan_payload,
     # Investment tools
     get_investment_holdings,
     get_portfolio_summary,
@@ -79,7 +83,18 @@ financial_agent_text = LlmAgent(
     model="gemini-2.5-flash-lite-preview-06-17",
     name="FinancialAgentText",
     instruction=financial_agent.instruction,
-    tools=[get_transactions, get_budgets, get_goals, add_transaction, create_budget_category, delete_budget_category, create_goal, update_goal, delete_goal],
+    tools=[
+        get_transactions,
+        get_budgets,
+        get_goals,
+        # wrapped payload variants to avoid default values in schema
+        add_transaction_payload,
+        create_budget_category_payload,
+        delete_budget_category,
+        create_goal,
+        update_goal,
+        delete_goal,
+    ],
 )
 
 runner_text = Runner(
@@ -129,6 +144,26 @@ planning_runner = Runner(
     agent=planning_agent,
     app_name="PennyWise",
     session_service=session_service,
+)
+
+# Text-capable planning agent for delegation via AgentTool
+planning_agent_text = LlmAgent(
+    model="gemini-2.5-flash",
+    name="PlanningAgentText",
+    instruction=planning_agent.instruction,
+    tools=[
+        get_transactions,
+        get_budgets,
+        get_goals,
+        get_latest_plan_payload,
+        emit_plan_preview,
+        finalize_plan_payload,
+        create_budget_category_payload,
+        delete_budget_category,
+        create_goal,
+        update_goal,
+        delete_goal,
+    ],
 )
 
 # --- Investment Agent Team (Coordinator + Specialists) & Runner ---
@@ -202,6 +237,60 @@ investment_agent = LlmAgent(
 
 investment_runner = Runner(
     agent=investment_agent,
+    app_name="PennyWise",
+    session_service=session_service,
+)
+
+# Text-capable investment agent for delegation via AgentTool
+investment_agent_text = LlmAgent(
+    model="gemini-2.5-flash",
+    name="InvestmentAgentText",
+    description=investment_agent.description,
+    instruction=investment_agent.instruction,
+    tools=[
+        # Research via AgentTool
+        market_research_tool,
+        # Portfolio tools directly for structured UI rendering
+        get_investment_holdings,
+        get_portfolio_summary,
+        list_trades,
+        create_trade,
+        get_quote,
+        get_watchlist,
+        add_watchlist_item,
+        delete_watchlist_item,
+    ],
+)
+
+# --- Unified Coordinator Agent (Voice) ---
+# Coordinates General Finance Assistant, Planning, and Investment agents via AgentTool
+coordinator_finance_tool = agent_tool.AgentTool(agent=financial_agent_text)
+coordinator_planning_tool = agent_tool.AgentTool(agent=planning_agent_text)
+coordinator_investment_tool = agent_tool.AgentTool(agent=investment_agent_text)
+
+unified_coordinator_agent = LlmAgent(
+    model="gemini-2.0-flash-live-001",
+    name="UnifiedCoordinatorAgent",
+    description="Top-level coordinator that routes requests to Finance, Planning, or Investment specialists.",
+    instruction=(
+        "You are the unified voice coordinator for PennyWise.\n"
+        "- Determine whether the user's request is about general personal finance, monthly planning, or investments.\n"
+        "- For general finance Q&A (transactions, budgets, goals, receipt logging), call the FinanceAssistant tool.\n"
+        "- For planning flows (propose/preview/finalize monthly plan), call the PlanningAssistant tool.\n"
+        "- For investment questions (portfolio, trades, quotes, watchlist, market research), call the InvestmentAssistant tool.\n"
+        "- Do not repeatedly bounce between assistants; choose the best one and stay within it unless the user changes topic.\n"
+        "- Always pass through and return structured tool results so the UI can render widgets.\n"
+        "- Keep responses concise and conversational."
+    ),
+    tools=[
+        coordinator_finance_tool,
+        coordinator_planning_tool,
+        coordinator_investment_tool,
+    ],
+)
+
+unified_runner = Runner(
+    agent=unified_coordinator_agent,
     app_name="PennyWise",
     session_service=session_service,
 )

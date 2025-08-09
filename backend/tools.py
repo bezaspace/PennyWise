@@ -114,6 +114,48 @@ def add_transaction(
     finally:
         next(db_gen, None)
 
+# ---------------- Wrapper tools to avoid default values in schema ----------------
+def add_transaction_payload(payload: dict) -> dict:
+    """
+    Wrapper that accepts a single payload object to avoid default values in tool schema.
+    Expected payload keys: description (str), amount (float), category (str, optional),
+    type (str, optional), date (str, optional)
+    """
+    description = payload.get("description")
+    amount = payload.get("amount")
+    if description is None or amount is None:
+        raise ValueError("description and amount are required")
+    return add_transaction(
+        user_id="user_123",
+        description=description,
+        amount=float(amount),
+        category=payload.get("category"),
+        type=payload.get("type"),
+        date=payload.get("date"),
+    )
+
+def create_budget_category_payload(payload: dict) -> dict:
+    """
+    Wrapper to create budget category using a single payload to avoid defaults in schema.
+    Expected payload keys: category (str), limit (float), period (str, optional)
+    """
+    category_name = (payload.get("category") or payload.get("category_name") or "").strip()
+    if not category_name:
+        raise ValueError("category is required")
+    limit = payload.get("limit")
+    if limit is None:
+        raise ValueError("limit is required")
+    period = payload.get("period") or "monthly"
+    return create_budget_category(category_name=category_name, limit=float(limit), period=period)
+
+def get_latest_plan_payload(payload: dict) -> Optional[dict]:
+    """
+    Wrapper to fetch latest plan with optional month using a single payload.
+    Expected payload keys: month (str, optional)
+    """
+    month = payload.get("month") if isinstance(payload, dict) else None
+    return get_latest_plan(month=month)
+
 def create_budget_category(category_name: str, limit: float, period: str = "monthly") -> dict:
     """
     Creates a new budget category and a corresponding budget.
@@ -530,6 +572,16 @@ def finalize_plan(user_id: str, plan: dict) -> dict:
         return summary
     finally:
         next(db_gen, None)
+
+def finalize_plan_payload(payload: dict) -> dict:
+    """
+    Wrapper to finalize a plan using a single payload and implicit user_id.
+    Expected payload keys: plan (dict)
+    """
+    plan = payload.get("plan") if isinstance(payload, dict) else None
+    if not isinstance(plan, dict):
+        raise ValueError("payload.plan (dict) is required")
+    return finalize_plan(user_id="user_123", plan=plan)
 
 def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
     """

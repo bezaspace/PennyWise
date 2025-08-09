@@ -39,9 +39,9 @@ type ReceiptOrItemData =
       confidence: string;
     };
 
-const DEFAULT_WS_URL = `ws://${window.location.hostname}:8000/api/ai/voice/ws/user_123`;
+const DEFAULT_WS_URL = `ws://${window.location.hostname}:8000/api/ai/unified/voice/ws/user_123`;
 
-export default function LiveAIVoiceChat({ onBack, mode = 'assistant' as 'assistant' | 'planner' | 'invest' }: { onBack: () => void; mode?: 'assistant' | 'planner' | 'invest' }) {
+export default function LiveAIVoiceChat({ onBack }: { onBack: () => void }) {
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
@@ -307,11 +307,7 @@ Please acknowledge that you've received this receipt information and ask if I'd 
     
     console.log('Connecting to WebSocket...');
     setConnectionStatus('connecting');
-    const wsUrl = mode === 'planner'
-      ? `ws://${window.location.hostname}:8000/api/ai/planner/voice/ws/user_123`
-      : mode === 'invest'
-        ? `ws://${window.location.hostname}:8000/api/ai/invest/voice/ws/user_123`
-        : DEFAULT_WS_URL;
+    const wsUrl = DEFAULT_WS_URL;
     ws.current = new WebSocket(wsUrl);
     
     ws.current.onopen = () => {
@@ -509,12 +505,10 @@ Please acknowledge that you've received this receipt information and ask if I'd 
         </View>
         
         <View style={styles.actionButtons}>
-          {mode === 'assistant' && (
-            <ReceiptUpload 
-              onReceiptProcessed={handleReceiptProcessed}
-              onError={handleReceiptError}
-            />
-          )}
+          <ReceiptUpload 
+            onReceiptProcessed={handleReceiptProcessed}
+            onError={handleReceiptError}
+          />
           
           {connectionStatus === 'connected' && (
             <TouchableOpacity 

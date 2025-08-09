@@ -18,7 +18,7 @@ from google.adk.agents import LiveRequestQueue
 import json
 import uuid
 from database import get_db
-from adk_services import runner, runner_text, session_service, planning_runner, investment_runner
+from adk_services import runner, runner_text, session_service, planning_runner, investment_runner, unified_runner
 from tools import set_websocket_for_tools, clear_websocket_for_tools, send_pending_tool_messages
 from receipt_service import receipt_service
 
@@ -43,17 +43,17 @@ router = APIRouter(prefix="/api/ai", tags=["AI"])
 # --- Live AI Voice Chat WebSocket Endpoint ---
 import json
 
-@router.websocket("/voice/ws/{user_id}")
-async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
-    """WebSocket endpoint for live AI voice chat (bidirectional audio/text)."""
+@router.websocket("/unified/voice/ws/{user_id}")
+async def unified_voice_chat_ws(websocket: WebSocket, user_id: str):
+    """Unified WebSocket endpoint for live AI voice chat using the unified coordinator agent."""
     await websocket.accept()
-    logger.info(f"Voice chat WebSocket connected for user: {user_id}")
+    logger.info(f"Unified voice chat WebSocket connected for user: {user_id}")
     
     # Set the WebSocket for tools to use
     set_websocket_for_tools(websocket)
     
     # Generate a new unique session ID for each connection
-    session_id = f"session_{uuid.uuid4()}"
+    session_id = f"unified_session_{uuid.uuid4()}"
     
     # Always create a new session for each voice chat instance
     try:
@@ -83,16 +83,16 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
         )
         
         live_request_queue = LiveRequestQueue()
-        live_events = runner.run_live(
+        live_events = unified_runner.run_live(
             session=session,
             live_request_queue=live_request_queue,
             run_config=run_config,
         )
-        logger.info("Live session started successfully with optimized VAD")
+        logger.info("Unified live session started successfully with optimized VAD")
         
     except Exception as e:
-        logger.error(f"Failed to start live session: {e}")
-        await websocket.close(code=1011, reason="Live session setup failed")
+        logger.error(f"Failed to start unified live session: {e}")
+        await websocket.close(code=1011, reason="Unified live session setup failed")
         return
 
     async def agent_to_client():
@@ -245,7 +245,7 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                 logger.info(f"=== END EVENT ===")
                 
         except Exception as e:
-            logger.error(f"Error in agent_to_client: {e}")
+            logger.error(f"Error in unified agent_to_client: {e}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             # Send error message to client
@@ -254,9 +254,10 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                 "message": "Connection error occurred"
             }
             try:
-                await websocket.send_text(json.dumps(error_message))
-            except:
-                pass
+                if websocket.client_state.CONNECTED:
+                    await websocket.send_text(json.dumps(error_message))
+            except Exception as send_err:
+                logger.warning(f"Failed to send error message over websocket: {send_err}")
 
     async def client_to_agent():
         try:
@@ -332,7 +333,7 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
                 logger.error(f"WebSocket task error: {e}")
                 
     except Exception as e:
-        logger.error(f"WebSocket connection error: {e}")
+        logger.error(f"Unified WebSocket connection error: {e}")
     finally:
         # Clean up resources
         clear_websocket_for_tools()  # Clear the WebSocket reference
@@ -348,6 +349,10 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
         except Exception as e:
             logger.warning(f"Error closing websocket: {e}")
 
+ # Backward-compatible endpoints: route to unified handler
+@router.websocket("/voice/ws/{user_id}")
+async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
+    return await unified_voice_chat_ws(websocket, user_id)
 
 # --- Live Planning Voice Chat WebSocket Endpoint ---
 @router.websocket("/planner/voice/ws/{user_id}")
