@@ -153,8 +153,16 @@ def get_latest_plan_payload(payload: dict) -> Optional[dict]:
     Wrapper to fetch latest plan with optional month using a single payload.
     Expected payload keys: month (str, optional)
     """
+    print(f"--- Tool: get_latest_plan_payload called with payload: {payload} ---")
     month = payload.get("month") if isinstance(payload, dict) else None
-    return get_latest_plan(month=month)
+    result = get_latest_plan(month=month)
+    try:
+        if result:
+            queue_tool_response("get_latest_plan_payload", result)
+    except Exception:
+        pass
+    print(f"--- Tool: get_latest_plan_payload returning: {result} ---")
+    return result
 
 def create_budget_category(category_name: str, limit: float, period: str = "monthly") -> dict:
     """
@@ -588,6 +596,7 @@ def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
     Retrieve the most recent plan. If month is provided (e.g., "2025-08"),
     return the latest plan for that month. Returns a normalized plan dict or None.
     """
+    print(f"--- Tool: get_latest_plan called for month: {month} ---")
     db_gen = get_db()
     db = next(db_gen)
     try:
@@ -596,11 +605,12 @@ def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
             query = query.filter(PlanDB.month == month)
         plan_row = query.order_by(PlanDB.created_at.desc()).first()
         if not plan_row:
+            print("--- Tool: get_latest_plan - No plan found ---")
             return None
         import json as _json
         allocations = _json.loads(plan_row.allocations_json) if plan_row.allocations_json else []
         goals = _json.loads(plan_row.goals_json) if plan_row.goals_json else []
-        return {
+        result = {
             "id": plan_row.id,
             "month": plan_row.month,
             "income": plan_row.income,
@@ -610,6 +620,13 @@ def get_latest_plan(month: Optional[str] = None) -> Optional[dict]:
             "goals": goals,
             "status": plan_row.status,
         }
+        print(f"--- Tool: get_latest_plan returning: {result} ---")
+        try:
+            if result:
+                queue_tool_response("get_latest_plan", result)
+        except Exception:
+            pass
+        return result
     finally:
         next(db_gen, None)
 

@@ -81,7 +81,7 @@ runner = Runner(
 # --- Text Chat Agent & Runner (for generate_content) ---
 financial_agent_text = LlmAgent(
     model="gemini-2.5-flash-lite-preview-06-17",
-    name="FinancialAgentText",
+    name="FinanceAssistant",
     instruction=financial_agent.instruction,
     tools=[
         get_transactions,
@@ -149,8 +149,22 @@ planning_runner = Runner(
 # Text-capable planning agent for delegation via AgentTool
 planning_agent_text = LlmAgent(
     model="gemini-2.5-flash",
-    name="PlanningAgentText",
-    instruction=planning_agent.instruction,
+    name="PlanningAssistant",
+    instruction="""You are a financial planning assistant. 
+
+CRITICAL: When asked about current financial plan, existing plan, or to show their plan:
+1. IMMEDIATELY call get_latest_plan_payload with payload {}
+2. Present the returned plan data clearly
+3. Do NOT try to answer without calling the tool first
+
+Your response should be: "Let me retrieve your current financial plan." Then call the tool and present the results.
+
+For other tasks:
+- Use emit_plan_preview for plan proposals
+- Use finalize_plan_payload only after explicit approval
+- Use other tools as needed for budgets/goals
+
+ALWAYS call tools - never answer from memory.""",
     tools=[
         get_transactions,
         get_budgets,
@@ -244,7 +258,7 @@ investment_runner = Runner(
 # Text-capable investment agent for delegation via AgentTool
 investment_agent_text = LlmAgent(
     model="gemini-2.5-flash",
-    name="InvestmentAgentText",
+    name="InvestmentAssistant",
     description=investment_agent.description,
     instruction=investment_agent.instruction,
     tools=[

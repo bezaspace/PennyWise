@@ -466,6 +466,22 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
       result.hasToolData = result.data.length > 0;
       break;
 
+    case 'get_latest_plan':
+      result.type = 'plan';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
+    case 'get_latest_plan_payload':
+      result.type = 'plan';
+      if (normalized && typeof normalized === 'object') {
+        result.data = [normalized];
+      }
+      result.hasToolData = result.data.length > 0;
+      break;
+
     default:
       break;
   }

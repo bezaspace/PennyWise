@@ -69,7 +69,7 @@ async def unified_voice_chat_ws(websocket: WebSocket, user_id: str):
     # Set up ADK live session for AUDIO modality with optimized VAD
     try:
         run_config = RunConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             realtime_input_config={
                 "automatic_activity_detection": {
                     "disabled": False,  # Enable automatic VAD
@@ -376,7 +376,7 @@ async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
 
     try:
         run_config = RunConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             realtime_input_config={
                 "automatic_activity_detection": {
                     "disabled": False,
@@ -576,7 +576,7 @@ async def investment_voice_chat_ws(websocket: WebSocket, user_id: str):
 
     try:
         run_config = RunConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             realtime_input_config={
                 "automatic_activity_detection": {
                     "disabled": False,
