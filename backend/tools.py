@@ -282,6 +282,10 @@ def get_transactions(user_id: str) -> List[Dict[str, Any]]:
             for t in transactions
         ]
         
+        try:
+            queue_tool_response("get_transactions", result)
+        except Exception:
+            pass
         return result
     finally:
         next(db_gen, None)
@@ -309,6 +313,10 @@ def get_budgets(user_id: str) -> List[Dict[str, Any]]:
             for b in budgets
         ]
         
+        try:
+            queue_tool_response("get_budgets", result)
+        except Exception:
+            pass
         return result
     finally:
         next(db_gen, None)
@@ -336,6 +344,10 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
             }
             for g in goals
         ]
+        try:
+            queue_tool_response("get_goals", result)
+        except Exception:
+            pass
         return result
     finally:
         next(db_gen, None)
