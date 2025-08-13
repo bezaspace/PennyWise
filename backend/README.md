@@ -47,6 +47,33 @@ A RESTful API backend for the PennyWise personal finance app built with FastAPI 
 - `GET /api/analytics/expenses` - Get monthly expenses
 - `GET /api/analytics/spending?days=30` - Get spending by category
 
+## AI Assistant
+
+PennyWise includes an advanced AI assistant powered by Google's Gemini model that provides:
+
+### Unified Agent Architecture
+- **Single Agent**: One unified AI assistant handles all financial tasks
+- **Comprehensive Tools**: Direct access to all financial, planning, investment, and market research tools
+- **Simplified Structure**: Streamlined from previous multi-agent coordinator pattern
+
+### Capabilities
+- **Financial Management**: Transactions, budgets, goals, and expense tracking
+- **Planning**: Monthly budget planning and financial goal setting  
+- **Investments**: Portfolio analysis, trade tracking, watchlist management
+- **Market Research**: Real-time stock quotes and financial news
+
+### AI Endpoints
+- `WebSocket /api/ai/unified/voice/ws/{user_id}` - Main voice chat endpoint
+- `POST /api/ai/chat/stream` - Text-based chat with streaming responses
+- `POST /api/ai/receipt/upload` - Receipt/photo analysis and processing
+- `GET /api/ai/health` - AI service health check
+
+### Voice Chat Features
+- Real-time bidirectional audio communication
+- Automatic voice activity detection
+- Interruption support for natural conversations
+- Multi-modal support (text, audio, images)
+
 ## Database
 
 - **Type**: SQLite
