@@ -18,7 +18,7 @@ from google.adk.agents import LiveRequestQueue
 import json
 import uuid
 from database import get_db
-from adk_services import runner, runner_text, session_service, planning_runner, investment_runner, unified_runner
+from adk_services import unified_runner, unified_runner_text, session_service
 from tools import set_websocket_for_tools, clear_websocket_for_tools, send_pending_tool_messages
 from receipt_service import receipt_service
 
@@ -384,428 +384,17 @@ async def ai_voice_chat_ws(websocket: WebSocket, user_id: str):
 # --- Live Planning Voice Chat WebSocket Endpoint ---
 @router.websocket("/planner/voice/ws/{user_id}")
 async def planning_voice_chat_ws(websocket: WebSocket, user_id: str):
-    """WebSocket endpoint for live AI voice chat dedicated to planning."""
-    await websocket.accept()
-    logger.info(f"Planning voice chat WebSocket connected for user: {user_id}")
-
-    set_websocket_for_tools(websocket)
-    session_id = f"planner_session_{uuid.uuid4()}"
-
-    try:
-        session = await session_service.create_session(
-            app_name="PennyWise", user_id=user_id, session_id=session_id
-        )
-        logger.info(f"Planner session created: {session_id}")
-    except Exception as create_error:
-        logger.error(f"Failed to create planner session: {create_error}")
-        await websocket.close(code=1011, reason="Session creation failed")
-        return
-
-    try:
-        run_config = RunConfig(
-            response_modalities=[types.Modality.AUDIO],
-            realtime_input_config={
-                "automatic_activity_detection": {
-                    "disabled": False,
-                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
-                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
-                    "prefix_padding_ms": 200,
-                    "silence_duration_ms": 600,
-                }
-            }
-        )
-
-        live_request_queue = LiveRequestQueue()
-        live_events = planning_runner.run_live(
-            session=session,
-            live_request_queue=live_request_queue,
-            run_config=run_config,
-        )
-        logger.info("Planning live session started")
-    except Exception as e:
-        logger.error(f"Failed to start planning live session: {e}")
-        await websocket.close(code=1011, reason="Live session setup failed")
-        return
-
-    async def agent_to_client():
-        try:
-            async for event in live_events:
-                await send_pending_tool_messages()
-
-                function_calls = []
-                function_responses = []
-
-                if hasattr(event, 'get_function_calls'):
-                    try:
-                        function_calls = event.get_function_calls()
-                    except Exception:
-                        pass
-                if hasattr(event, 'get_function_responses'):
-                    try:
-                        function_responses = event.get_function_responses()
-                    except Exception:
-                        pass
-
-                # Prefer ADK helpers; fallback to parts only if empty
-                if not function_calls and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-                    for part in event.content.parts:
-                        if getattr(part, 'function_call', None):
-                            function_calls.append(part.function_call)
-                if not function_responses and hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-                    for part in event.content.parts:
-                        if getattr(part, 'function_response', None):
-                            function_responses.append(part.function_response)
-
-                if getattr(event, "turn_complete", False):
-                    await websocket.send_text(json.dumps({"turn_complete": True, "interrupted": False}))
-                    continue
-                if getattr(event, "interrupted", False):
-                    await websocket.send_text(json.dumps({"turn_complete": False, "interrupted": True}))
-                    continue
-
-                if function_calls:
-                    seen_calls = set()
-                    for call in function_calls:
-                        tool_name = getattr(call, 'name', 'unknown')
-                        tool_args = getattr(call, 'args', {})
-                        tool_id = getattr(call, 'id', None)
-                        key = tool_id or json.dumps({"n": tool_name, "a": tool_args}, sort_keys=True)
-                        if key in seen_calls:
-                            continue
-                        seen_calls.add(key)
-                        await websocket.send_text(json.dumps({
-                            "mime_type": "tool/call",
-                            "tool_name": tool_name,
-                            "tool_args": tool_args,
-                            "tool_id": tool_id
-                        }))
-
-                if function_responses:
-                    seen_responses = set()
-                    for response in function_responses:
-                        tool_name = getattr(response, 'name', 'unknown')
-                        tool_response = getattr(response, 'response', {})
-                        tool_id = getattr(response, 'id', None)
-                        key = tool_id or tool_name
-                        if key in seen_responses:
-                            continue
-                        seen_responses.add(key)
-                        await websocket.send_text(json.dumps({
-                            "mime_type": "tool/response",
-                            "tool_name": tool_name,
-                            "tool_response": tool_response,
-                            "tool_id": tool_id
-                        }))
-
-                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts') and event.content.parts:
-                    part = event.content.parts[0]
-                    if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith("audio/pcm"):
-                        audio_data = part.inline_data.data
-                        if audio_data:
-                            await websocket.send_text(json.dumps({
-                                "mime_type": "audio/pcm",
-                                "data": base64.b64encode(audio_data).decode("ascii")
-                            }))
-                        continue
-                    if getattr(part, "text", None):
-                        text_content = part.text.strip()
-                        if text_content:
-                            await websocket.send_text(json.dumps({
-                                "mime_type": "text/plain",
-                                "data": text_content,
-                                "partial": getattr(event, "partial", False)
-                            }))
-        except Exception as e:
-            logger.error(f"Error in planning agent_to_client: {e}")
-            try:
-                await websocket.send_text(json.dumps({"error": True, "message": "Connection error occurred"}))
-            except:
-                pass
-
-    async def client_to_agent():
-        try:
-            while True:
-                message_json = await websocket.receive_text()
-                message = json.loads(message_json)
-
-                if message.get("type") == "interrupt":
-                    try:
-                        if hasattr(live_request_queue, "cancel"):
-                            live_request_queue.cancel()
-                        live_request_queue.send_realtime()
-                    except Exception:
-                        pass
-                    continue
-
-                mime_type = message.get("mime_type")
-                data = message.get("data")
-                if mime_type == "text/plain" and data:
-                    content = types.Content(role="user", parts=[types.Part.from_text(text=data)])
-                    live_request_queue.send_content(content=content)
-                elif mime_type == "audio/pcm" and data:
-                    try:
-                        decoded_data = base64.b64decode(data)
-                        live_request_queue.send_realtime(types.Blob(data=decoded_data, mime_type="audio/pcm;rate=16000"))
-                    except Exception:
-                        continue
-        except Exception:
-            return
-
-    try:
-        agent_task = asyncio.create_task(agent_to_client())
-        client_task = asyncio.create_task(client_to_agent())
-        done, pending = await asyncio.wait([agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION)
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        for task in done:
-            try:
-                await task
-            except Exception as e:
-                logger.error(f"Planning WebSocket task error: {e}")
-    except Exception as e:
-        logger.error(f"Planning WebSocket connection error: {e}")
-    finally:
-        clear_websocket_for_tools()
-        try:
-            live_request_queue.close()
-        except Exception:
-            pass
-        try:
-            if websocket.client_state.CONNECTED:
-                await websocket.close()
-        except Exception:
-            pass
+    """WebSocket endpoint for live AI voice chat dedicated to planning - now uses unified agent."""
+    # Route to the unified voice chat handler since planning is now integrated
+    return await unified_voice_chat_ws(websocket, user_id)
 
 
 # --- Live Investment Voice Chat WebSocket Endpoint ---
 @router.websocket("/invest/voice/ws/{user_id}")
 async def investment_voice_chat_ws(websocket: WebSocket, user_id: str):
-    """WebSocket endpoint for live AI voice chat dedicated to investments."""
-    await websocket.accept()
-    logger.info(f"Investment voice chat WebSocket connected for user: {user_id}")
-
-    set_websocket_for_tools(websocket)
-    session_id = f"invest_session_{uuid.uuid4()}"
-
-    try:
-        session = await session_service.create_session(
-            app_name="PennyWise", user_id=user_id, session_id=session_id
-        )
-        logger.info(f"Investment session created: {session_id}")
-    except Exception as create_error:
-        logger.error(f"Failed to create investment session: {create_error}")
-        await websocket.close(code=1011, reason="Session creation failed")
-        return
-
-    try:
-        run_config = RunConfig(
-            response_modalities=[types.Modality.AUDIO],
-            realtime_input_config={
-                "automatic_activity_detection": {
-                    "disabled": False,
-                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
-                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
-                    "prefix_padding_ms": 200,
-                    "silence_duration_ms": 600,
-                }
-            },
-        )
-
-        live_request_queue = LiveRequestQueue()
-        live_events = investment_runner.run_live(
-            session=session, live_request_queue=live_request_queue, run_config=run_config
-        )
-        logger.info("Investment live session started")
-    except Exception as e:
-        logger.error(f"Failed to start investment live session: {e}")
-        await websocket.close(code=1011, reason="Live session setup failed")
-        return
-
-    async def agent_to_client():
-        try:
-            async for event in live_events:
-                await send_pending_tool_messages()
-
-                function_calls = []
-                function_responses = []
-
-                if hasattr(event, "get_function_calls"):
-                    try:
-                        function_calls = event.get_function_calls()
-                    except Exception:
-                        pass
-                if hasattr(event, "get_function_responses"):
-                    try:
-                        function_responses = event.get_function_responses()
-                    except Exception:
-                        pass
-
-                if getattr(event, "turn_complete", False):
-                    await websocket.send_text(
-                        json.dumps({"turn_complete": True, "interrupted": False})
-                    )
-                    continue
-                if getattr(event, "interrupted", False):
-                    await websocket.send_text(
-                        json.dumps({"turn_complete": False, "interrupted": True})
-                    )
-                    continue
-
-                if function_calls:
-                    seen_calls = set()
-                    for call in function_calls:
-                        tool_name = getattr(call, "name", "unknown")
-                        tool_args = getattr(call, "args", {})
-                        tool_id = getattr(call, "id", None)
-                        key = tool_id or json.dumps({"n": tool_name, "a": tool_args}, sort_keys=True)
-                        if key in seen_calls:
-                            continue
-                        seen_calls.add(key)
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "mime_type": "tool/call",
-                                    "tool_name": tool_name,
-                                    "tool_args": tool_args,
-                                    "tool_id": tool_id,
-                                }
-                            )
-                        )
-
-                if function_responses:
-                    seen_responses = set()
-                    for response in function_responses:
-                        tool_name = getattr(response, "name", "unknown")
-                        tool_response = getattr(response, "response", {})
-                        tool_id = getattr(response, "id", None)
-                        key = tool_id or tool_name
-                        if key in seen_responses:
-                            continue
-                        seen_responses.add(key)
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "mime_type": "tool/response",
-                                    "tool_name": tool_name,
-                                    "tool_response": tool_response,
-                                    "tool_id": tool_id,
-                                }
-                            )
-                        )
-
-                if (
-                    hasattr(event, "content")
-                    and event.content
-                    and hasattr(event.content, "parts")
-                    and event.content.parts
-                ):
-                    part = event.content.parts[0]
-                    if getattr(part, "inline_data", None) and part.inline_data.mime_type.startswith(
-                        "audio/pcm"
-                    ):
-                        audio_data = part.inline_data.data
-                        if audio_data:
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "mime_type": "audio/pcm",
-                                        "data": base64.b64encode(audio_data).decode("ascii"),
-                                    }
-                                )
-                            )
-                        continue
-                    if getattr(part, "text", None):
-                        text_content = part.text.strip()
-                        if text_content:
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "mime_type": "text/plain",
-                                        "data": text_content,
-                                        "partial": getattr(event, "partial", False),
-                                    }
-                                )
-                            )
-        except Exception as e:
-            logger.error(f"Error in investment agent_to_client: {e}")
-            try:
-                await websocket.send_text(
-                    json.dumps(
-                        {"error": True, "message": "Connection error occurred"}
-                    )
-                )
-            except:
-                pass
-
-    async def client_to_agent():
-        try:
-            while True:
-                message_json = await websocket.receive_text()
-                message = json.loads(message_json)
-
-                if message.get("type") == "interrupt":
-                    try:
-                        if hasattr(live_request_queue, "cancel"):
-                            live_request_queue.cancel()
-                        live_request_queue.send_realtime()
-                    except Exception:
-                        pass
-                    continue
-
-                mime_type = message.get("mime_type")
-                data = message.get("data")
-                if mime_type == "text/plain" and data:
-                    content = types.Content(
-                        role="user", parts=[types.Part.from_text(text=data)]
-                    )
-                    live_request_queue.send_content(content=content)
-                elif mime_type == "audio/pcm" and data:
-                    try:
-                        decoded_data = base64.b64decode(data)
-                        live_request_queue.send_realtime(
-                            types.Blob(
-                                data=decoded_data, mime_type="audio/pcm;rate=16000"
-                            )
-                        )
-                    except Exception:
-                        continue
-        except Exception:
-            return
-
-    try:
-        agent_task = asyncio.create_task(agent_to_client())
-        client_task = asyncio.create_task(client_to_agent())
-        done, pending = await asyncio.wait(
-            [agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION
-        )
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        for task in done:
-            try:
-                await task
-            except Exception as e:
-                logger.error(f"Investment WebSocket task error: {e}")
-    except Exception as e:
-        logger.error(f"Investment WebSocket connection error: {e}")
-    finally:
-        clear_websocket_for_tools()
-        try:
-            live_request_queue.close()
-        except Exception:
-            pass
-        try:
-            if websocket.client_state.CONNECTED:
-                await websocket.close()
-        except Exception:
-            pass
+    """WebSocket endpoint for live AI voice chat dedicated to investments - now uses unified agent."""
+    # Route to the unified voice chat handler since investments is now integrated
+    return await unified_voice_chat_ws(websocket, user_id)
 # --- ADK-powered Text Chat Endpoint ---
 @router.post("/chat/stream")
 async def chat_stream(request: FinancialAdviceRequest):
@@ -822,8 +411,8 @@ async def chat_stream(request: FinancialAdviceRequest):
             parts=[SimpleNamespace(text=request.prompt)]
         )
 
-        # Run the agent with the prompt using the text runner (ADK expects these args)
-        events = runner_text.run(
+        # Run the agent with the prompt using the unified text runner
+        events = unified_runner_text.run(
             user_id="text_user",
             session_id=session_id,
             new_message=new_message,
@@ -1008,7 +597,7 @@ Please help the user with this receipt data. If they want to add this as a trans
         async def event_generator():
             try:
                 response_found = False
-                async for event in runner.run_async(
+                async for event in unified_runner.run_async(
                     user_id=user_id, session_id=session_id, new_message=user_message
                 ):
                     is_final = False
@@ -1088,9 +677,9 @@ async def ai_health_check():
         return {
             "status": "healthy",
             "service": "AI Chat",
-            "runner_available": runner is not None,
+            "unified_runner_available": unified_runner is not None,
             "session_service_available": session_service is not None,
-            "message": "AI service is operational"
+            "message": "AI service is operational with unified single agent"
         }
     except Exception as e:
         logger.error(f"AI health check failed: {e}")
@@ -1163,15 +752,15 @@ async def debug_runner():
     try:
         # Check runner configuration
         runner_info = {
-            "agent_name": runner.agent.name if runner.agent else "No agent",
-            "app_name": runner.app_name if hasattr(runner, 'app_name') else "No app name",
-            "session_service": str(type(runner.session_service)) if hasattr(runner, 'session_service') else "No session service",
-            "session_service_same": runner.session_service is session_service if hasattr(runner, 'session_service') else False
+            "agent_name": unified_runner.agent.name if unified_runner.agent else "No agent",
+            "app_name": unified_runner.app_name if hasattr(unified_runner, 'app_name') else "No app name",
+            "session_service": str(type(unified_runner.session_service)) if hasattr(unified_runner, 'session_service') else "No session service",
+            "session_service_same": unified_runner.session_service is session_service if hasattr(unified_runner, 'session_service') else False
         }
         
         # Try to access the session through the runner's session service
         try:
-            runner_session = await runner.session_service.get_session(
+            runner_session = await unified_runner.session_service.get_session(
                 app_name="PennyWise", user_id=user_id, session_id=session_id
             )
             runner_can_access = True
@@ -1226,7 +815,7 @@ async def debug_chat(request: FinancialAdviceRequest):
         
         events_received = []
         try:
-            async for event in runner.run_async(
+            async for event in unified_runner.run_async(
                 user_id=user_id, session_id=session_id, new_message=user_message
             ):
                 event_info = {
