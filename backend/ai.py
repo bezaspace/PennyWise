@@ -205,6 +205,36 @@ async def unified_voice_chat_ws(websocket: WebSocket, user_id: str):
                         if key in seen_responses:
                             continue
                         seen_responses.add(key)
+
+                        # Handle MarketResearchAssistant's specific dictionary output
+                        if tool_name in ('google_search', 'MarketResearchAssistant', 'MarketResearchAgent') and isinstance(tool_response, dict):
+                            try:
+                                # Extract renderedContent from all possible ADK-compliant locations
+                                sources_html = (
+                                    tool_response.get("renderedContent")
+                                    or tool_response.get("rendered_content")
+                                    or (
+                                        tool_response.get("grounding_metadata", {})
+                                        .get("search_entry_point", {})
+                                        .get("rendered_content")
+                                        if isinstance(tool_response.get("grounding_metadata", {}), dict)
+                                        else None
+                                    )
+                                )
+                                if sources_html:
+                                    sources_message = {
+                                        "mime_type": "tool/response",
+                                        "tool_name": "MarketResearchAssistantSources",
+                                        "tool_response": {"renderedContent": sources_html},
+                                        "tool_id": tool_id
+                                    }
+                                    await websocket.send_text(json.dumps(sources_message))
+                                    # Don't continue, so the summary text can still be processed below
+                            except Exception as e:
+                                logger.error(f"Error processing MarketResearchAssistant response: {e}")
+                                # Fallback to sending the raw response
+                                pass
+
                         message = {
                             "mime_type": "tool/response",
                             "tool_name": tool_name,
@@ -272,9 +302,6 @@ async def unified_voice_chat_ws(websocket: WebSocket, user_id: str):
                     try:
                         if hasattr(live_request_queue, "cancel"):
                             live_request_queue.cancel()
-                        # Send activity end to flush any pending audio
-                        # Note: activity_end parameter removed in newer ADK versions
-                        live_request_queue.send_realtime()
                         logger.info("Successfully processed interrupt")
                     except Exception as e:
                         logger.warning(f"Error during interrupt: {e}")

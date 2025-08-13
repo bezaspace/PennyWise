@@ -25,20 +25,32 @@ interface Message {
   isUser: boolean;
   receiptData?: any;
   toolData?: {
-    type: 'transactions' | 'budgets' | 'goals';
+    type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
     data: any[];
   };
 }
 
-interface ReceiptData {
-  merchant: string;
-  amount: number;
-  date: string;
-  category: string;
-  description: string;
-  items: string[];
-  confidence: string;
-}
+type ReceiptOrItemData =
+  | {
+      type?: undefined;
+      merchant: string;
+      amount: number;
+      date: string;
+      category: string;
+      description: string;
+      items: string[];
+      confidence: string;
+    }
+  | {
+      type: 'item';
+      name: string;
+      brand?: string;
+      description: string;
+      category: string;
+      detected_price: number | null;
+      price_found: boolean;
+      confidence: string;
+    };
 
 export default function AIChatScreen() {
   const [voiceMode, setVoiceMode] = useState(false);
@@ -128,11 +140,17 @@ export default function AIChatScreen() {
     }
   };
 
-  const handleReceiptProcessed = (receiptData: ReceiptData) => {
+  const handleReceiptProcessed = (receiptData: ReceiptOrItemData) => {
     // Add user message showing receipt was uploaded
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: `Receipt uploaded: ${receiptData.merchant} - $${receiptData.amount.toFixed(2)}`,
+      text: 'type' in receiptData && receiptData.type === 'item'
+        ? `Item photo uploaded: ${receiptData.name}${receiptData.brand ? ' (' + receiptData.brand + ')' : ''}${
+            receiptData.price_found && typeof receiptData.detected_price === 'number'
+              ? ` - $${receiptData.detected_price.toFixed(2)}`
+              : ''
+          }`
+        : `Receipt uploaded: ${(receiptData as any).merchant} - $${(receiptData as any).amount?.toFixed?.(2) ?? ''}`,
       isUser: true,
       receiptData,
     };
@@ -142,15 +160,25 @@ export default function AIChatScreen() {
 
     // Add AI response with receipt details
     const aiMessageId = (Date.now() + 1).toString();
-    const receiptSummary = `I've processed your receipt! Here's what I found:
+    const receiptSummary = 'type' in receiptData && receiptData.type === 'item'
+      ? `I've processed your item photo! Here's what I found:
 
-Merchant: ${receiptData.merchant}
-Amount: $${receiptData.amount.toFixed(2)}
-Date: ${receiptData.date}
-Category: ${receiptData.category}
+Item: ${receiptData.name}${receiptData.brand ? ` (Brand: ${receiptData.brand})` : ''}
 Description: ${receiptData.description}
-${receiptData.items.length > 0 ? `Items: ${receiptData.items.join(', ')}` : ''}
+Category: ${receiptData.category}
+Price Detected: ${receiptData.price_found ? `$${receiptData.detected_price?.toFixed(2)}` : 'No'}
 Confidence: ${receiptData.confidence}
+
+${receiptData.price_found ? 'Would you like me to analyze if this is a good purchase based on your budget and goals?' : 'Please let me know the price, and I can help you decide if this is a good purchase.'}`
+      : `I've processed your receipt! Here's what I found:
+
+Merchant: ${(receiptData as any).merchant}
+Amount: $${(receiptData as any).amount?.toFixed?.(2) ?? ''}
+Date: ${(receiptData as any).date}
+Category: ${(receiptData as any).category}
+Description: ${(receiptData as any).description}
+${((receiptData as any).items || []).length > 0 ? `Items: ${((receiptData as any).items || []).join(', ')}` : ''}
+Confidence: ${(receiptData as any).confidence}
 
 Would you like me to add this as a transaction to your records? I can also help you modify any of the details if needed.`;
 

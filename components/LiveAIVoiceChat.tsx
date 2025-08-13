@@ -12,7 +12,7 @@ interface VoiceMessage {
   isUser: boolean;
   receiptData?: any;
   toolData?: {
-      type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary';
+      type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
     data: any[];
   };
 }

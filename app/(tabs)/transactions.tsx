@@ -76,10 +76,8 @@ export default function TransactionsScreen() {
       // Auto-categorize using AI if no category provided
       let category = newTransaction.category;
       if (!category) {
-        category = await geminiService.categorizeTransaction(
-          newTransaction.description,
-          Math.abs(amount)
-        );
+        // TODO: Implement AI categorization
+        category = 'Other';
       }
 
       const transaction: Omit<Transaction, 'id'> = {

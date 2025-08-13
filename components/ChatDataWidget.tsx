@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { colors } from '@/constants/colors';
 import { TransactionItem } from './TransactionItem';
 import { BudgetProgress } from './BudgetProgress';
@@ -7,10 +7,12 @@ import { GoalCard } from './GoalCard';
 import { Transaction, Budget, Goal } from '@/services/api';
 import { View as RNView } from 'react-native';
 import PlanPreview from './PlanPreview';
+import { ExternalLink } from 'lucide-react-native';
+import { WebView } from 'react-native-webview';
 
 interface ChatDataWidgetProps {
-  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary';
-  data: any[];
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
+  data: any;
   title?: string;
 }
 
@@ -184,6 +186,50 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
           </View>
         );
 
+      case 'market_research':
+        const htmlContent = data?.renderedContent;
+        if (!htmlContent) return null;
+
+        // Inject CSS to style the HTML content for dark mode
+        const injectedStyles = `
+          <style>
+            body { 
+              background-color: ${colors.neutral[800]}; 
+              color: ${colors.neutral[200]}; 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              margin: 0;
+              padding: 10px;
+            }
+            a { color: ${colors.primary[400]}; text-decoration: none; }
+            .web-search-result { border-bottom: 1px solid ${colors.neutral[700]}; padding-bottom: 10px; margin-bottom: 10px; }
+            .web-search-result:last-child { border-bottom: none; }
+            .web-search-result-title { font-size: 16px; font-weight: 600; }
+            .web-search-result-url { font-size: 12px; color: ${colors.neutral[400]}; margin-bottom: 4px; }
+            .web-search-result-snippet { font-size: 14px; color: ${colors.neutral[300]}; }
+          </style>
+        `;
+
+        return (
+          <View style={styles.widgetContainer}>
+            <Text style={styles.widgetTitle}>{title || 'Market Research Sources'}</Text>
+            <View style={styles.webviewContainer}>
+              <WebView
+                originWhitelist={['*']}
+                source={{ html: `${injectedStyles}<body>${htmlContent}</body>` }}
+                style={styles.webview}
+                onShouldStartLoadWithRequest={(event) => {
+                  // Open external links in the device's browser
+                  if (event.navigationType === 'click') {
+                    Linking.openURL(event.url);
+                    return false;
+                  }
+                  return true;
+                }}
+              />
+            </View>
+          </View>
+        );
+
       default:
         return null;
     }
@@ -307,4 +353,60 @@ const styles = StyleSheet.create({
   },
   gain: { color: colors.success[500] },
   loss: { color: colors.error[500] },
+  webviewContainer: {
+    height: 300, // Give the WebView a fixed height
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: colors.neutral[800],
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  sourcesContainer: {
+    gap: 8,
+  },
+  sourceItem: {
+    backgroundColor: colors.neutral[700],
+    borderRadius: 8,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary[500],
+  },
+  sourceHeader: {
+    marginBottom: 6,
+  },
+  sourceTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    gap: 8,
+  },
+  sourceTitle: {
+    color: colors.neutral[100],
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 14,
+    lineHeight: 18,
+    flex: 1,
+  },
+  sourceUrl: {
+    color: colors.primary[400],
+    fontFamily: 'Inter-Medium',
+    fontSize: 12,
+    textTransform: 'lowercase',
+  },
+  sourceSnippet: {
+    color: colors.neutral[300],
+    fontFamily: 'Inter-Regular',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  sourceDate: {
+    color: colors.neutral[500],
+    fontFamily: 'Inter-Regular',
+    fontSize: 11,
+    textAlign: 'right',
+  },
 });

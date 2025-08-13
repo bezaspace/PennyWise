@@ -1,7 +1,7 @@
 import { Transaction, Budget, Goal } from '@/services/api';
 
 export interface ParsedToolData {
-  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | null;
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research' | null;
   data: any[];
   hasToolData: boolean;
 }
@@ -262,6 +262,7 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
   };
 
   console.log(`Parsing tool response for ${toolName}:`, toolData);
+  console.log(`Tool name type: ${typeof toolName}, exact value: "${toolName}"`);
 
   // Normalize common ADK wrappers and stringified JSON
   const unwrap = (payload: any): any => {
@@ -482,10 +483,217 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
       result.hasToolData = result.data.length > 0;
       break;
 
+    case 'google_search':
+    case 'MarketResearchAssistant':
+    case 'MarketResearchAgent':
+      result.type = 'market_research';
+      console.log('Processing market research tool response:', JSON.stringify(normalized, null, 2));
+
+      // Check for renderedContent or rendered_content HTML field
+      let renderedContent = null;
+      if (normalized && typeof normalized === 'object') {
+        if (typeof normalized.renderedContent === 'string') {
+          renderedContent = normalized.renderedContent;
+        } else if (typeof normalized.rendered_content === 'string') {
+          renderedContent = normalized.rendered_content;
+        } else if (
+          normalized.grounding_metadata &&
+          normalized.grounding_metadata.search_entry_point &&
+          typeof normalized.grounding_metadata.search_entry_point.rendered_content === 'string'
+        ) {
+          renderedContent = normalized.grounding_metadata.search_entry_point.rendered_content;
+        }
+      }
+
+      if (renderedContent) {
+        // Pass HTML to widget for WebView rendering
+        result.data = [{ renderedContent }];
+        result.hasToolData = true;
+        console.log('Passing renderedContent to widget for market research:', renderedContent.substring(0, 200));
+      } else if (normalized && typeof normalized === 'object') {
+        // Fallback: extract sources as before
+        let searchResults = [];
+
+        if (Array.isArray(normalized)) {
+          searchResults = normalized;
+        } else if (normalized.results && Array.isArray(normalized.results)) {
+          searchResults = normalized.results;
+        } else if (normalized.search_results && Array.isArray(normalized.search_results)) {
+          searchResults = normalized.search_results;
+        } else if (normalized.items && Array.isArray(normalized.items)) {
+          searchResults = normalized.items;
+        } else if (normalized.sources && Array.isArray(normalized.sources)) {
+          searchResults = normalized.sources;
+        } else if (normalized.web && normalized.web.results && Array.isArray(normalized.web.results)) {
+          searchResults = normalized.web.results;
+        } else {
+          const textResponse = normalized.text || normalized.response || normalized.content || JSON.stringify(normalized);
+          if (typeof textResponse === 'string') {
+            searchResults = extractSourcesFromText(textResponse);
+          } else {
+            searchResults = [{
+              title: normalized.title || 'Search Result',
+              url: normalized.url || normalized.link || '#',
+              snippet: normalized.snippet || normalized.description || '',
+              source: normalized.source || 'Google Search',
+              date: normalized.date || new Date().toISOString().split('T')[0]
+            }];
+          }
+        }
+
+        result.data = searchResults.map((item: any, index: number) => ({
+          id: item.id || index.toString(),
+          title: item.title || item.name || item.headline || `Search Result ${index + 1}`,
+          url: item.url || item.link || item.href || '#',
+          snippet: item.snippet || item.description || item.summary || item.content || '',
+          source: item.source || item.domain || (item.url && item.url !== '#' ? new URL(item.url).hostname : 'Google Search'),
+          date: item.date || item.published_date || item.publish_date || new Date().toISOString().split('T')[0]
+        }));
+        result.hasToolData = result.data.length > 0;
+      }
+      console.log('Final market research result:', result);
+      break;
+
     default:
+      // Check if this might be a market research related tool by name pattern
+      if (toolName && (
+        toolName.toLowerCase().includes('market') ||
+        toolName.toLowerCase().includes('research') ||
+        toolName.toLowerCase().includes('search')
+      )) {
+        console.log(`Detected potential market research tool: ${toolName}`);
+        result.type = 'market_research';
+
+        // Try to extract sources from the response
+        if (normalized && typeof normalized === 'object') {
+          const textResponse = normalized.text || normalized.response || normalized.content || JSON.stringify(normalized);
+          if (typeof textResponse === 'string') {
+            result.data = extractSourcesFromText(textResponse);
+            result.hasToolData = result.data.length > 0;
+          }
+        }
+      }
       break;
   }
 
   console.log(`Parsed tool response result:`, result);
   return result;
+}
+
+/**
+ * Helper function to extract sources from Gemini's rendered content HTML
+ */
+function extractSourcesFromRenderedContent(renderedContent: string): any[] {
+  const sources: any[] = [];
+
+  // Parse HTML to extract links and titles
+  const linkPattern = /<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+  let match;
+
+  while ((match = linkPattern.exec(renderedContent)) !== null) {
+    const url = match[1];
+    const title = match[2];
+
+    sources.push({
+      title: title,
+      url: url,
+      snippet: '',
+      source: url ? new URL(url).hostname : '',
+      date: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  return sources;
+}
+
+/**
+ * Helper function to extract source information from text responses
+ * This handles cases where the market research agent returns text with embedded source links
+ */
+function extractSourcesFromText(text: string): any[] {
+  const sources: any[] = [];
+
+  // Pattern to match URLs in text
+  const urlPattern = /https?:\/\/[^\s\)\]]+/g;
+  const urls = text.match(urlPattern) || [];
+
+  // Pattern to match source citations like "Source: [Title](URL)" or "[Title](URL)"
+  const citationPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let match;
+
+  while ((match = citationPattern.exec(text)) !== null) {
+    const title = match[1];
+    const url = match[2];
+
+    sources.push({
+      title: title,
+      url: url,
+      snippet: '',
+      source: url && url !== '#' ? new URL(url).hostname : '',
+      date: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  // Pattern to match "Source: Title - URL" format
+  const sourcePattern = /(?:Source|Sources?):\s*([^\n-]+?)\s*-\s*(https?:\/\/[^\s\n]+)/gi;
+  while ((match = sourcePattern.exec(text)) !== null) {
+    const title = match[1].trim();
+    const url = match[2];
+
+    sources.push({
+      title: title,
+      url: url,
+      snippet: '',
+      source: new URL(url).hostname,
+      date: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  // Pattern to match "Title (URL)" format
+  const titleUrlPattern = /([^(\n]+)\s*\((https?:\/\/[^)]+)\)/g;
+  while ((match = titleUrlPattern.exec(text)) !== null) {
+    const title = match[1].trim();
+    const url = match[2];
+
+    // Avoid duplicates
+    if (!sources.some(s => s.url === url)) {
+      sources.push({
+        title: title,
+        url: url,
+        snippet: '',
+        source: new URL(url).hostname,
+        date: new Date().toISOString().split('T')[0]
+      });
+    }
+  }
+
+  // If no citations found, create sources from URLs
+  if (sources.length === 0 && urls.length > 0) {
+    urls.forEach((url, index) => {
+      try {
+        sources.push({
+          title: `Source ${index + 1}`,
+          url: url,
+          snippet: '',
+          source: new URL(url).hostname,
+          date: new Date().toISOString().split('T')[0]
+        });
+      } catch (e) {
+        // Invalid URL, skip
+      }
+    });
+  }
+
+  // If still no sources, create a generic one
+  if (sources.length === 0) {
+    sources.push({
+      title: 'Market Research Results',
+      url: '#',
+      snippet: text.substring(0, 200) + (text.length > 200 ? '...' : ''),
+      source: 'Research Analysis',
+      date: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  return sources;
 }
