@@ -180,8 +180,7 @@ ALWAYS call tools - never answer from memory.""",
     ],
 )
 
-# --- Investment Agent Team (Coordinator + Specialists) & Runner ---
-# Specialist 1: Market Research with built-in Google Search (grounded, up-to-date)
+# --- Market Research Agent (Standalone Main Agent) ---
 market_research_agent = LlmAgent(
     model="gemini-2.5-flash",
     name="MarketResearchAgent",
@@ -189,13 +188,33 @@ market_research_agent = LlmAgent(
     instruction=(
         "You are a market research specialist.\n"
         "- Use google_search to find recent news, earnings reports, analyst notes, and key events for tickers or companies mentioned.\n"
-        "- Prefer trustworthy sources. Summarize concisely with citations if available.\n"
+        "- Always provide source links in your responses when available.\n"
+        "- Prefer trustworthy financial sources like Reuters, Bloomberg, Yahoo Finance, MarketWatch, etc.\n"
+        "- Summarize concisely with citations and source URLs.\n"
         "- Do not make portfolio-specific recommendations; only provide objective context and facts."
     ),
     tools=[google_search],
 )
 
-# Specialist 2: Portfolio Insight with DB-backed tools
+# Text-capable market research agent for delegation via AgentTool
+market_research_agent_text = LlmAgent(
+    model="gemini-2.5-flash",
+    name="MarketResearchAssistant",
+    description="Finds and summarizes latest company news, earnings, and market context using Google Search.",
+    instruction=(
+        "You are a market research specialist.\n"
+        "- Use google_search to find recent news, earnings reports, analyst notes, and key events for tickers or companies mentioned.\n"
+        "- Always provide source links in your responses when available.\n"
+        "- Prefer trustworthy financial sources like Reuters, Bloomberg, Yahoo Finance, MarketWatch, etc.\n"
+        "- Summarize concisely with citations and source URLs.\n"
+        "- Do not make portfolio-specific recommendations; only provide objective context and facts."
+    ),
+    tools=[google_search],
+)
+
+# --- Investment Agent Team (Portfolio Specialist Only) & Runner ---
+
+# Portfolio Insight with DB-backed tools (formerly Specialist 2)
 portfolio_insight_agent = LlmAgent(
     model="gemini-2.5-flash",
     name="PortfolioInsightAgent",
@@ -219,24 +238,20 @@ portfolio_insight_agent = LlmAgent(
     ],
 )
 
-# Coordinator: InvestmentAgent invokes MarketResearch via AgentTool, and calls portfolio tools directly
-market_research_tool = agent_tool.AgentTool(agent=market_research_agent)
-
 investment_agent = LlmAgent(
     model="gemini-2.0-flash-live-001",
     name="InvestmentAgent",
-    description="Coordinator for investment Q&A and advice; delegates research vs. portfolio tasks to specialists.",
+    description="Portfolio management specialist focused on user's holdings, trades, and watchlist.",
     instruction=(
-        "You are the coordinator for investment advice.\n"
-        "- If the user asks about latest news, earnings, or external info about a stock/index/sector, call the MarketResearchAgent tool.\n"
-        "- If the user asks about their holdings, performance, gains, trades, watchlist, or quotes, CALL THE PROVIDED PORTFOLIO TOOLS DIRECTLY (do not delegate).\n"
-        "- Combine specialist outputs into tailored advice considering diversification, risk, time horizon (if inferred), and concentration.\n"
+        "You are a portfolio management specialist.\n"
+        "- Focus on the user's holdings, performance, gains, trades, watchlist, and quotes using the provided portfolio tools.\n"
+        "- Provide exposure by sector/ticker, concentration risks, winners/laggards, and portfolio analysis.\n"
+        "- You may add symbols to the watchlist or record trades when instructed.\n"
+        "- For market research, news, or external information about stocks, inform the user that the system will handle that separately.\n"
         "- Be explicit about uncertainty and avoid guarantees. Offer next steps (rebalance, add/remove watchlist, or set alerts/goals).\n"
         "- Never ask for a user id. The backend provides context. Always return the structured tool results."
     ),
     tools=[
-        # Research via AgentTool
-        market_research_tool,
         # Portfolio tools directly for structured UI rendering
         get_investment_holdings,
         get_portfolio_summary,
@@ -262,8 +277,6 @@ investment_agent_text = LlmAgent(
     description=investment_agent.description,
     instruction=investment_agent.instruction,
     tools=[
-        # Research via AgentTool
-        market_research_tool,
         # Portfolio tools directly for structured UI rendering
         get_investment_holdings,
         get_portfolio_summary,
@@ -277,21 +290,23 @@ investment_agent_text = LlmAgent(
 )
 
 # --- Unified Coordinator Agent (Voice) ---
-# Coordinates General Finance Assistant, Planning, and Investment agents via AgentTool
+# Coordinates General Finance Assistant, Planning, Investment, and Market Research agents via AgentTool
 coordinator_finance_tool = agent_tool.AgentTool(agent=financial_agent_text)
 coordinator_planning_tool = agent_tool.AgentTool(agent=planning_agent_text)
 coordinator_investment_tool = agent_tool.AgentTool(agent=investment_agent_text)
+coordinator_market_research_tool = agent_tool.AgentTool(agent=market_research_agent_text)
 
 unified_coordinator_agent = LlmAgent(
     model="gemini-2.0-flash-live-001",
     name="UnifiedCoordinatorAgent",
-    description="Top-level coordinator that routes requests to Finance, Planning, or Investment specialists.",
+    description="Top-level coordinator that routes requests to Finance, Planning, Investment, or Market Research specialists.",
     instruction=(
         "You are the unified voice coordinator for PennyWise.\n"
-        "- Determine whether the user's request is about general personal finance, monthly planning, or investments.\n"
+        "- Determine whether the user's request is about general personal finance, monthly planning, investments, or market research.\n"
         "- For general finance Q&A (transactions, budgets, goals, receipt logging), call the FinanceAssistant tool.\n"
         "- For planning flows (propose/preview/finalize monthly plan), call the PlanningAssistant tool.\n"
-        "- For investment questions (portfolio, trades, quotes, watchlist, market research), call the InvestmentAssistant tool.\n"
+        "- For investment portfolio questions (holdings, trades, quotes, watchlist), call the InvestmentAssistant tool.\n"
+        "- For market research, stock news, earnings, analyst reports, or external market information, call the MarketResearchAssistant tool.\n"
         "- Do not repeatedly bounce between assistants; choose the best one and stay within it unless the user changes topic.\n"
         "- Always pass through and return structured tool results so the UI can render widgets.\n"
         "- Keep responses concise and conversational."
@@ -300,6 +315,7 @@ unified_coordinator_agent = LlmAgent(
         coordinator_finance_tool,
         coordinator_planning_tool,
         coordinator_investment_tool,
+        coordinator_market_research_tool,
     ],
 )
 

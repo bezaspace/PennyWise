@@ -5,6 +5,15 @@
 			"type": "shell",
 			"label": "Run backend server",
 			"command": "python backend/main.py"
+		},
+		{
+			"label": "Install backend requirements",
+			"type": "shell",
+			"command": "pip install -r backend/requirements.txt",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }
