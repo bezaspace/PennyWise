@@ -483,9 +483,11 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
       result.hasToolData = result.data.length > 0;
       break;
 
-    case 'google_search':
-    case 'MarketResearchAssistant':
-    case 'MarketResearchAgent':
+  case 'google_search':
+  case 'MarketResearchAssistant':
+  case 'MarketResearchAgent':
+  case 'exa_search':
+  case 'exa_search_payload':
       result.type = 'market_research';
       console.log('Processing market research tool response:', JSON.stringify(normalized, null, 2));
 
@@ -505,12 +507,12 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
         }
       }
 
-      if (renderedContent) {
-        // Pass HTML to widget for WebView rendering
-        result.data = [{ renderedContent }];
-        result.hasToolData = true;
-        console.log('Passing renderedContent to widget for market research:', renderedContent.substring(0, 200));
-      } else if (normalized && typeof normalized === 'object') {
+        if (renderedContent) {
+          // Pass HTML to widget for WebView rendering
+          result.data = [{ renderedContent }];
+          result.hasToolData = true;
+          console.log('Passing renderedContent to widget for market research:', renderedContent.substring(0, 200));
+        } else if (normalized && typeof normalized === 'object') {
         // Fallback: extract sources as before
         let searchResults = [];
 
@@ -541,14 +543,55 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
           }
         }
 
-        result.data = searchResults.map((item: any, index: number) => ({
-          id: item.id || index.toString(),
-          title: item.title || item.name || item.headline || `Search Result ${index + 1}`,
-          url: item.url || item.link || item.href || '#',
-          snippet: item.snippet || item.description || item.summary || item.content || '',
-          source: item.source || item.domain || (item.url && item.url !== '#' ? new URL(item.url).hostname : 'Google Search'),
-          date: item.date || item.published_date || item.publish_date || new Date().toISOString().split('T')[0]
-        }));
+        // Simplify to minimal link objects and dedupe by URL.
+        // If an item doesn't include a usable URL (or uses '#'), try extracting URLs from its
+        // snippet/text using the existing extractSourcesFromText helper.
+        const links: any[] = [];
+        const seen = new Set<string>();
+
+        const pushLink = (title: string, url: string) => {
+          try {
+            const cleanUrl = String(url).trim();
+            if (!cleanUrl || cleanUrl === '#') return false;
+            // filter out image/static asset urls
+            if (isLikelyAssetUrl(cleanUrl)) return false;
+            // normalize trailing slash
+            const normalized = cleanUrl.replace(/\/$/, '');
+            if (seen.has(normalized)) return false;
+            seen.add(normalized);
+            links.push({ title: title || prettyTitleFromUrl(normalized) || `Source ${links.length + 1}`, url: normalized });
+            return true;
+          } catch (e) {
+            return false;
+          }
+        };
+
+        searchResults.forEach((item: any, index: number) => {
+          const possibleUrl = item.url || item.link || item.href || item.source || null;
+
+          // If the item has an explicit usable URL, use it
+          if (possibleUrl && String(possibleUrl).trim() !== '#') {
+            pushLink(item.title || item.name || `Source ${links.length + 1}`, String(possibleUrl));
+            return;
+          }
+
+          // Otherwise, try to pull URLs out of the snippet/text for this item
+          const textToScan = item.snippet || item.text || item.description || JSON.stringify(item || {});
+          const extracted = extractSourcesFromText(String(textToScan));
+          if (extracted && extracted.length > 0) {
+            extracted.forEach((s) => {
+              pushLink(s.title || item.title || `Source ${links.length + 1}`, s.url);
+            });
+            return;
+          }
+
+          // As a final fallback, if the item has a 'id' that looks like a URL, try it
+          if (item.id && typeof item.id === 'string' && (item.id.startsWith('http') || item.id.startsWith('www.'))) {
+            pushLink(item.title || item.name || `Source ${links.length + 1}`, item.id);
+          }
+        });
+
+        result.data = links;
         result.hasToolData = result.data.length > 0;
       }
       console.log('Final market research result:', result);
@@ -696,4 +739,43 @@ function extractSourcesFromText(text: string): any[] {
   }
 
   return sources;
+}
+
+/**
+ * Heuristics to ignore image/static asset URLs and favicons.
+ */
+function isLikelyAssetUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+    const path = u.pathname || '';
+    // common static file extensions
+    if (/\.(png|jpe?g|gif|bmp|svg|ico|webp|map)$/i.test(path)) return true;
+    // favicon or screenshot indicators
+    if (/favicon|screenshot|__screenshot|chart/gi.test(path + u.hostname)) return true;
+    // CDN-like small-image hosts (heuristic)
+    if (/cdn\.|static\.|assets\./i.test(u.hostname)) return true;
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Create a readable title from a URL when no title is present.
+ */
+function prettyTitleFromUrl(urlStr: string): string {
+  try {
+    const u = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      const last = parts[parts.length - 1];
+      // If last looks like an id or file, fall back to hostname
+      if (/^[a-zA-Z0-9\-\_]+$/.test(last) && last.length <= 30) {
+        return decodeURIComponent(last.replace(/[-_]/g, ' '));
+      }
+    }
+    return u.hostname.replace(/^www\./, '');
+  } catch (e) {
+    return String(urlStr).replace(/^https?:\/\//, '');
+  }
 }

@@ -207,7 +207,7 @@ async def unified_voice_chat_ws(websocket: WebSocket, user_id: str):
                         seen_responses.add(key)
 
                         # Handle MarketResearchAssistant's specific dictionary output
-                        if tool_name in ('google_search', 'MarketResearchAssistant', 'MarketResearchAgent') and isinstance(tool_response, dict):
+                        if tool_name in ('google_search', 'MarketResearchAssistant', 'MarketResearchAgent', 'exa_search', 'exa_search_payload') and isinstance(tool_response, dict):
                             try:
                                 # Extract renderedContent from all possible ADK-compliant locations
                                 sources_html = (

@@ -1,5 +1,4 @@
 from google.adk.agents import LlmAgent
-from google.adk.tools import google_search
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from database import DATABASE_URL
@@ -29,6 +28,7 @@ from tools import (
     get_watchlist,
     add_watchlist_item,
     delete_watchlist_item,
+    exa_search_payload,
 )
 import logging
 
@@ -47,7 +47,7 @@ unified_agent_live = LlmAgent(
         "- Handle general personal finance (transactions, budgets, goals, receipt logging) using the finance tools.\n"
         "- Handle monthly planning: retrieve existing plans, propose plan previews, and finalize only with explicit approval.\n"
         "- Handle investments: holdings, portfolio summary, trades, quotes, and watchlist.\n"
-        "- Handle market research using google_search and present sources succinctly.\n"
+        "- Handle market research using Exa search and present sources succinctly.\n"
         "- Never ask for user_id; the backend provides it.\n"
         "- Keep responses concise and conversational, and always pass through structured tool results."
     ),
@@ -75,8 +75,8 @@ unified_agent_live = LlmAgent(
         get_watchlist,
         add_watchlist_item,
         delete_watchlist_item,
-        # Market research
-        google_search,
+    # Market research
+    exa_search_payload,
     ],
 )
 
@@ -117,8 +117,8 @@ unified_agent_text = LlmAgent(
         get_watchlist,
         add_watchlist_item,
         delete_watchlist_item,
-        # Market research
-        google_search,
+    # Market research
+    exa_search_payload,
     ],
 )
 

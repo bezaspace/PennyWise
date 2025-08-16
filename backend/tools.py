@@ -17,6 +17,11 @@ from typing import List, Dict, Any, Optional
 import asyncio
 import json
 import logging
+import os
+try:
+    from exa_py import Exa
+except Exception:
+    Exa = None
 from utils.time_utils import get_current_month_string, get_current_date_iso
 from stock_service import get_quote as get_symbol_quote, get_quotes as get_symbol_quotes
 
@@ -351,6 +356,109 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
         return result
     finally:
         next(db_gen, None)
+
+
+# ---------------- Exa search wrapper ----------------
+def exa_search_payload(payload: dict) -> dict:
+    """
+    Wrapper to call Exa.search_and_contents with a payload dict.
+    Expected payload keys: query (required), num_results, text, highlights, category, context
+    Returns a normalized dict with a 'results' list suitable for frontend parsing.
+    """
+    if Exa is None:
+        raise RuntimeError("exa_py not installed or failed to import")
+
+    api_key = os.getenv('EXA_API_KEY')
+    if not api_key:
+        raise RuntimeError('EXA_API_KEY environment variable not set')
+
+    query = payload.get('query')
+    if not query or not isinstance(query, str):
+        raise ValueError('query (string) is required')
+
+    num_results = int(payload.get('num_results') or payload.get('numResults') or 5)
+    text = payload.get('text', False)
+    highlights = payload.get('highlights', False)
+    category = payload.get('category')
+    context = payload.get('context', False)
+
+    exa = Exa(api_key)
+
+    try:
+        resp = exa.search_and_contents(
+            query,
+            text=text,
+            highlights=highlights,
+            num_results=num_results,
+            category=category,
+            context=context,
+        )
+    except Exception as e:
+        logging.error(f"Exa search failed: {e}")
+        raise
+
+    # Normalize response to { results: [ { id, title, url, snippet, source, date, text?, highlights? } ] }
+    normalized_results = []
+    try:
+        results = getattr(resp, 'results', None) or resp.get('results') if isinstance(resp, dict) else None
+        # If SDK returns simple dict-like
+        if results is None and isinstance(resp, dict):
+            # Try top-level candidates
+            for key in ('results', 'search_results', 'items', 'sources', 'web'):
+                if key in resp and isinstance(resp[key], list):
+                    results = resp[key]
+                    break
+
+        if results and isinstance(results, list):
+            for r in results:
+                # r may be object-like or dict-like
+                try:
+                    entry = {
+                        'id': r.get('id') if isinstance(r, dict) else getattr(r, 'id', None),
+                        'title': r.get('title') if isinstance(r, dict) else getattr(r, 'title', None),
+                        'url': r.get('url') if isinstance(r, dict) else getattr(r, 'url', None),
+                        'snippet': r.get('snippet') or r.get('highlights') if isinstance(r, dict) else None,
+                        'source': r.get('source') if isinstance(r, dict) else None,
+                        'date': r.get('publishedDate') or r.get('published_date') if isinstance(r, dict) else None,
+                    }
+                    # include text/highlights when requested
+                    if text:
+                        entry['text'] = r.get('text') if isinstance(r, dict) else getattr(r, 'text', None)
+                    if highlights:
+                        entry['highlights'] = r.get('highlights') if isinstance(r, dict) else getattr(r, 'highlights', None)
+
+                    normalized_results.append(entry)
+                except Exception:
+                    continue
+        else:
+            # Fallback: if resp contains text or summary, create single entry
+            content_text = None
+            if isinstance(resp, dict):
+                content_text = resp.get('text') or resp.get('summary') or json.dumps(resp)
+            else:
+                content_text = str(resp)
+            normalized_results.append({
+                'id': '0',
+                'title': 'Search Results',
+                'url': '#',
+                'snippet': content_text[:800],
+                'source': 'Exa',
+                'date': None,
+            })
+    except Exception as e:
+        logging.error(f"Error normalizing Exa response: {e}")
+        # Return generic fallback
+        normalized_results = [{
+            'id': '0',
+            'title': 'Search Results',
+            'url': '#',
+            'snippet': 'No results',
+            'source': 'Exa',
+            'date': None,
+        }]
+
+    result_payload = { 'results': normalized_results }
+    return result_payload
 
 def create_goal(goal_data: dict) -> dict:
     """

@@ -187,11 +187,12 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
         );
 
       case 'market_research':
-        const htmlContent = data?.renderedContent;
-        if (!htmlContent) return null;
-
-        // Inject CSS to style the HTML content for dark mode
-        const injectedStyles = `
+        // Support both shapes: { renderedContent } or an array of result objects
+        const htmlContent = Array.isArray(data) ? data[0]?.renderedContent : data?.renderedContent;
+        // If we have HTML, render in WebView (preserve existing behavior)
+        if (htmlContent) {
+          // Inject CSS to style the HTML content for dark mode
+          const injectedStyles = `
           <style>
             body { 
               background-color: ${colors.neutral[800]}; 
@@ -208,24 +209,64 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
             .web-search-result-snippet { font-size: 14px; color: ${colors.neutral[300]}; }
           </style>
         `;
+          return (
+            <View style={styles.widgetContainer}>
+              <Text style={styles.widgetTitle}>{title || 'Market Research Sources'}</Text>
+              <View style={styles.webviewContainer}>
+                <WebView
+                  originWhitelist={['*']}
+                  source={{ html: `${injectedStyles}<body>${htmlContent}</body>` }}
+                  style={styles.webview}
+                  onShouldStartLoadWithRequest={(event) => {
+                    // Open external links in the device's browser
+                    if (event.navigationType === 'click') {
+                      Linking.openURL(event.url);
+                      return false;
+                    }
+                    return true;
+                  }}
+                />
+              </View>
+            </View>
+          );
+        }
+
+        // If no HTML, but data is an array of structured results, render them natively
+        let resultsArray = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : null);
+        if (!resultsArray || resultsArray.length === 0) return null;
+
+        // Defensive: ensure every item is an object with title and url strings to avoid raw text nodes
+        resultsArray = resultsArray.map((item: any, idx: number) => {
+          if (!item || typeof item === 'string') {
+            return { title: String(item || `Source ${idx + 1}`), url: '#' };
+          }
+          return {
+            title: item.title && typeof item.title === 'string' ? item.title : (item.name && typeof item.name === 'string' ? item.name : `Source ${idx + 1}`),
+            url: item.url && typeof item.url === 'string' ? item.url : (item.link && typeof item.link === 'string' ? item.link : '#')
+          };
+        });
 
         return (
           <View style={styles.widgetContainer}>
             <Text style={styles.widgetTitle}>{title || 'Market Research Sources'}</Text>
-            <View style={styles.webviewContainer}>
-              <WebView
-                originWhitelist={['*']}
-                source={{ html: `${injectedStyles}<body>${htmlContent}</body>` }}
-                style={styles.webview}
-                onShouldStartLoadWithRequest={(event) => {
-                  // Open external links in the device's browser
-                  if (event.navigationType === 'click') {
-                    Linking.openURL(event.url);
-                    return false;
-                  }
-                  return true;
-                }}
-              />
+            <View style={styles.sourcesContainer}>
+              {resultsArray.map((item: any, idx: number) => {
+                // If the title is just a placeholder like "Source 4", replace it with a sequential label
+                const isPlaceholder = typeof item.title === 'string' && /^Source\s+\d+$/i.test(item.title.trim());
+                const displayTitle = !isPlaceholder && item.title ? item.title : `Source ${idx + 1}`;
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.sourceItem}
+                    onPress={() => { if (item.url && item.url !== '#') Linking.openURL(item.url); }}
+                  >
+                    <View style={styles.sourceTitleContainer}>
+                      <Text style={styles.sourceTitle}>{displayTitle}</Text>
+                      <Text style={styles.sourceUrl}>{(item.url || '').replace(/^https?:\/\//, '')}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         );
