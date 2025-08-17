@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-nati
 import { colors } from '@/constants/colors';
 import ReceiptUpload from './ReceiptUpload';
 import { ChatDataWidget } from './ChatDataWidget';
+import ProductAlternativesCarousel from './ProductAlternativesCarousel';
 import ToolCallWidget from './ToolCallWidget';
 import { parseAIResponseForToolData, parseToolResponse } from '@/utils/aiResponseParser';
 
@@ -13,7 +14,7 @@ interface VoiceMessage {
   isUser: boolean;
   receiptData?: any;
   toolData?: {
-      type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research' | 'product_alternatives';
     data: any[];
   };
   // Optional transient running-tool metadata
@@ -62,6 +63,25 @@ export default function LiveAIVoiceChat({ onBack }: { onBack: () => void }) {
   const audioChunkBuffer = useRef<string[]>([]);
   const isPlayingAudio = useRef(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
+
+  // Helper: detect duplicate tool data to avoid rendering duplicate widgets
+  const isDuplicateToolData = (prevMessages: VoiceMessage[], toolDataObj?: { type: string; data: any[] } | null) => {
+    if (!toolDataObj) return false;
+    try {
+      const key = JSON.stringify({ t: toolDataObj.type, d: toolDataObj.data });
+      const recent = prevMessages.slice(-6); // look back a few messages
+      for (const m of recent) {
+        if (m.toolData) {
+          const otherKey = JSON.stringify({ t: m.toolData.type, d: m.toolData.data });
+          if (otherKey === key) return true;
+        }
+      }
+    } catch (e) {
+      // If serialization fails, fall back to no duplicate detection
+      return false;
+    }
+    return false;
+  };
 
   // Helper: encode PCM to base64
   function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -380,7 +400,10 @@ Please acknowledge that you've received this receipt information and ask if I'd 
                 return [...withoutExistingPlan, toolResponseMessage];
               });
             } else {
-              setMessages(prev => [...prev, toolResponseMessage]);
+              setMessages(prev => {
+                if (isDuplicateToolData(prev, toolResponseMessage.toolData)) return prev;
+                return [...prev, toolResponseMessage];
+              });
             }
           }
         } else if (msg.mime_type === 'text/plain' && msg.data) {
@@ -425,7 +448,10 @@ Please acknowledge that you've received this receipt information and ask if I'd 
               return [...withoutExistingPlan, newMessage];
             });
           } else {
-            setMessages(prev => [...prev, newMessage]);
+            setMessages(prev => {
+              if (isDuplicateToolData(prev, newMessage.toolData)) return prev;
+              return [...prev, newMessage];
+            });
           }
         } else if (msg.interrupted) {
           console.log('AI interrupted');
@@ -525,11 +551,15 @@ Please acknowledge that you've received this receipt information and ask if I'd 
             )}
             {msg.toolData && (
               <View style={styles.toolDataContainer}>
-                <ChatDataWidget 
-                  type={msg.toolData.type}
-                  data={msg.toolData.data}
-                  compact={true}
-                />
+                {msg.toolData.type === 'product_alternatives' ? (
+                  <ProductAlternativesCarousel data={msg.toolData.data} />
+                ) : (
+                  <ChatDataWidget 
+                    type={msg.toolData.type}
+                    data={msg.toolData.data}
+                    compact={true}
+                  />
+                )}
               </View>
             )}
           </View>

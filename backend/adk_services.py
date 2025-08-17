@@ -29,6 +29,7 @@ from tools import (
     add_watchlist_item,
     delete_watchlist_item,
     exa_search_payload,
+    exa_productsearch_tool,
 )
 import logging
 
@@ -77,6 +78,7 @@ unified_agent_live = LlmAgent(
         delete_watchlist_item,
     # Market research
     exa_search_payload,
+    exa_productsearch_tool,
     ],
 )
 
@@ -119,6 +121,7 @@ unified_agent_text = LlmAgent(
         delete_watchlist_item,
     # Market research
     exa_search_payload,
+    exa_productsearch_tool,
     ],
 )
 

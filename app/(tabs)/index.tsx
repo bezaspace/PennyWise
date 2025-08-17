@@ -7,6 +7,7 @@ import { GoalCard } from '@/components/GoalCard';
 import { colors } from '@/constants/colors';
 import { globalStyles } from '@/constants/styles';
 import { apiService, Transaction, Goal } from '@/services/api';
+import SpendingPie from '@/components/SpendingPie';
 
 export default function DashboardScreen() {
   const [balance, setBalance] = useState(0);
@@ -14,6 +15,7 @@ export default function DashboardScreen() {
   const [expenses, setExpenses] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [spendingByCategory, setSpendingByCategory] = useState<Record<string, number> | null>(null);
   const [isBalanceVisible, setIsBalanceVisible] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -23,14 +25,16 @@ export default function DashboardScreen() {
         totalBalance,
         monthlyIncome,
         monthlyExpenses,
-        allTransactions,
-        allGoals,
+  allTransactions,
+  allGoals,
+  spending,
       ] = await Promise.all([
         apiService.getTotalBalance(),
         apiService.getMonthlyIncome(),
         apiService.getMonthlyExpenses(),
         apiService.getTransactions(),
         apiService.getGoals(),
+  apiService.getSpendingByCategory(),
       ]);
 
       setBalance(totalBalance);
@@ -38,6 +42,7 @@ export default function DashboardScreen() {
       setExpenses(monthlyExpenses);
       setTransactions(allTransactions.slice(0, 5)); // Show only recent 5
       setGoals(allGoals.slice(0, 2)); // Show only top 2 goals
+  setSpendingByCategory(spending);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     }
@@ -100,6 +105,9 @@ export default function DashboardScreen() {
           budget={2000} // Mock budget limit
           savings={balance * 0.3} // Mock savings calculation
         />
+
+  {/* Spending pie chart */}
+  <SpendingPie data={spendingByCategory} />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Transactions</Text>

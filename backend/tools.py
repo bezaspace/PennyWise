@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 try:
     from exa_py import Exa
 except Exception:
@@ -458,6 +459,225 @@ def exa_search_payload(payload: dict) -> dict:
         }]
 
     result_payload = { 'results': normalized_results }
+    return result_payload
+
+
+def exa_productsearch_tool(payload: dict) -> dict:
+    """
+    Product alternatives search using Exa. Accepts either:
+      - { query: str, num_results?: int, include_domains?: [str] }
+      - { item: { name, brand?, description?, detected_price?, price_found?, category? }, num_results?: int }
+
+    Returns normalized: { results: [ { id, title, url, snippet, source, date, price?, merchant?, image? } ] }
+    """
+    if Exa is None:
+        raise RuntimeError("exa_py not installed or failed to import")
+
+    api_key = os.getenv('EXA_API_KEY')
+    if not api_key:
+        raise RuntimeError('EXA_API_KEY environment variable not set')
+
+    # Build query
+    query = None
+    num_results = int(payload.get('num_results') or payload.get('numResults') or 4)
+    include_domains = payload.get('include_domains')
+
+    item = payload.get('item')
+    if item and isinstance(item, dict):
+        name = (item.get('name') or '').strip()
+        brand = (item.get('brand') or '').strip()
+        category = (item.get('category') or '').strip()
+        detected_price = item.get('detected_price')
+        parts = []
+        if brand:
+            parts.append(brand)
+        if name:
+            parts.append(name)
+        if category and not name:
+            parts.append(category)
+        base = ' '.join(parts) or name or category or payload.get('query')
+        if detected_price:
+            query = f"cheapest alternatives to {base} cheaper than ${detected_price} buy online"
+        else:
+            query = f"cheapest alternatives to {base} buy online price compare"
+    else:
+        query = payload.get('query')
+
+    if not query or not isinstance(query, str):
+        raise ValueError('query (or item.name) is required')
+
+    exa = Exa(api_key)
+
+    try:
+        # Limit to Amazon results for now by including site:amazon.com in the query
+        amazon_query = query
+        if 'site:amazon.com' not in amazon_query.lower():
+            amazon_query = f"site:amazon.com {query}"
+
+        resp = exa.search_and_contents(
+            amazon_query,
+            text=True,
+            highlights=False,
+            num_results=num_results,
+            category=None,
+            context=False,
+        )
+    except Exception as e:
+        logging.error(f"Exa product search failed: {e}")
+        raise
+
+    # Normalize response similar to exa_search_payload but try to extract images/prices
+    normalized_results = []
+    try:
+        results = getattr(resp, 'results', None) or (resp.get('results') if isinstance(resp, dict) else None)
+        if results is None and isinstance(resp, dict):
+            for key in ('results', 'search_results', 'items', 'sources', 'web'):
+                if key in resp and isinstance(resp[key], list):
+                    results = resp[key]
+                    break
+
+        if results and isinstance(results, list):
+            for r in results:
+                try:
+                    # unwrap dict-like or object-like
+                    url = r.get('url') if isinstance(r, dict) else getattr(r, 'url', None)
+                    title = r.get('title') if isinstance(r, dict) else getattr(r, 'title', None)
+                    snippet = r.get('snippet') if isinstance(r, dict) else (r.get('highlights') if isinstance(r, dict) else getattr(r, 'text', None))
+                    source = r.get('source') if isinstance(r, dict) else getattr(r, 'source', None)
+                    date = r.get('publishedDate') or r.get('published_date') if isinstance(r, dict) else getattr(r, 'publishedDate', None)
+
+                    # attempt to find image or price in common locations
+                    image = None
+                    price = None
+                    merchant = None
+
+                    # common keys
+                    if isinstance(r, dict):
+                        image = r.get('image') or r.get('thumbnail') or r.get('image_url')
+                        merchant = r.get('merchant') or r.get('source')
+                        # price may be embedded in structured fields
+                        if 'price' in r:
+                            try:
+                                price = float(r.get('price'))
+                            except Exception:
+                                price = None
+
+                    # fallback: try to extract a price from text
+                    text_blob = ''
+                    if isinstance(r, dict):
+                        text_blob = (r.get('text') or r.get('snippet') or '')
+                    else:
+                        text_blob = getattr(r, 'text', '') or ''
+
+                    if not price and isinstance(text_blob, str):
+                        m = re.search(r"\$(\d+[\d,.]*)", text_blob)
+                        if m:
+                            try:
+                                price = float(m.group(1).replace(',', ''))
+                            except Exception:
+                                price = None
+
+                    entry = {
+                        'id': (r.get('id') if isinstance(r, dict) else getattr(r, 'id', None)) or url or title,
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet,
+                        'source': source,
+                        'date': date,
+                    }
+                    if price is not None:
+                        entry['price'] = price
+                    if merchant:
+                        entry['merchant'] = merchant
+                    if image:
+                        entry['image'] = image
+
+                    normalized_results.append(entry)
+                except Exception:
+                    continue
+        else:
+            # Fallback: create single entry
+            content_text = None
+            if isinstance(resp, dict):
+                content_text = resp.get('text') or resp.get('summary') or json.dumps(resp)
+            else:
+                content_text = str(resp)
+            normalized_results.append({
+                'id': '0',
+                'title': 'Search Results',
+                'url': '#',
+                'snippet': content_text[:800],
+                'source': 'Exa',
+                'date': None,
+            })
+    except Exception as e:
+        logging.error(f"Error normalizing Exa product response: {e}")
+        normalized_results = [{
+            'id': '0',
+            'title': 'Search Results',
+            'url': '#',
+            'snippet': 'No results',
+            'source': 'Exa',
+            'date': None,
+        }]
+
+    # Deduplicate by url
+    seen = set()
+    deduped = []
+    for it in normalized_results:
+        u = (it.get('url') or '').rstrip('/') if it.get('url') else None
+        key = u or it.get('title')
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(it)
+
+    # Trim to requested num_results
+    deduped = deduped[:num_results]
+    # Try to canonicalize Amazon product pages by extracting ASINs and only keep product pages
+    canonical = []
+    asin_re = re.compile(r"(?:/dp/|/gp/product/|/product/|ASIN[\"']?:\s*[\"']?)([A-Z0-9]{10})", re.IGNORECASE)
+    for it in deduped:
+        url = (it.get('url') or '')
+        snippet = it.get('snippet') or ''
+        text_blob = ''
+        # try to collect a text blob to search for ASIN
+        if isinstance(it.get('snippet'), str):
+            text_blob = it.get('snippet')
+        # Search in URL first
+        m = asin_re.search(url)
+        if not m:
+            # search in snippet/text
+            m = asin_re.search(snippet)
+        if not m:
+            # look for common asin= query param
+            m2 = re.search(r"[?&]asin=([A-Z0-9]{10})", url, re.IGNORECASE)
+            if m2:
+                m = m2
+
+        if m:
+            asin = m.group(1)
+            canonical_url = f"https://www.amazon.com/dp/{asin}"
+            # prefer canonical url
+            it['url'] = canonical_url
+            # normalize title if it contains Amazon prefix
+            canonical.append(it)
+        else:
+            # If no ASIN, skip — we only want direct product pages for now
+            continue
+
+    # Trim to num_results after filtering
+    canonical = canonical[:num_results]
+
+    result_payload = { 'results': canonical }
+    # Do not automatically queue duplicate tool responses. Only queue if there are pending websocket clients
+    try:
+        if _current_websocket:
+            queue_tool_response('exa_productsearch_tool', result_payload)
+    except Exception:
+        pass
+
     return result_payload
 
 def create_goal(goal_data: dict) -> dict:

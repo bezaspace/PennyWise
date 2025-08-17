@@ -1,7 +1,7 @@
 import { Transaction, Budget, Goal } from '@/services/api';
 
 export interface ParsedToolData {
-  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research' | null;
+  type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research' | 'product_alternatives' | null;
   data: any[];
   hasToolData: boolean;
 }
@@ -595,6 +595,31 @@ export function parseToolResponse(toolName: string, toolData: any): ParsedToolDa
         result.hasToolData = result.data.length > 0;
       }
       console.log('Final market research result:', result);
+      break;
+
+    case 'exa_productsearch_tool':
+      // Normalize product results into product_alternatives
+      result.type = 'product_alternatives';
+      try {
+        const norm = normalized;
+        let items: any[] = [];
+        if (Array.isArray(norm)) items = norm;
+        else if (norm && typeof norm === 'object') items = norm.results || norm.data || [];
+        // Ensure items are array of { title, url, price?, merchant?, image? }
+        result.data = (items || []).map((it: any, idx: number) => ({
+          id: it.id || idx.toString(),
+          title: it.title || it.name || `Product ${idx + 1}`,
+          url: it.url || it.link || '#',
+          price: it.price || it.amount || null,
+          currency: it.currency || 'USD',
+          merchant: it.merchant || it.source || '',
+          image: it.image || it.thumbnail || null,
+          snippet: it.snippet || it.text || '',
+        }));
+        result.hasToolData = result.data.length > 0;
+      } catch (e) {
+        result.hasToolData = false;
+      }
       break;
 
     default:
