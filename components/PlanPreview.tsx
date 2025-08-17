@@ -24,6 +24,7 @@ interface PlanPreviewProps {
     allocations?: PlanAllocation[];
     goals?: PlanGoal[] | null;
   } | null;
+  compact?: boolean;
 }
 
 function currency(amount?: number | null) {
@@ -32,20 +33,20 @@ function currency(amount?: number | null) {
   return `$${v.toFixed(0)}`;
 }
 
-export default function PlanPreview({ plan }: PlanPreviewProps) {
+export default function PlanPreview({ plan, compact }: PlanPreviewProps) {
   if (!plan) return null;
   const allocations = Array.isArray(plan.allocations) ? plan.allocations : [];
   const goals = Array.isArray(plan.goals) ? plan.goals : [];
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
+  <View style={[styles.container, compact && styles.containerCompact]}>
+  <View style={[styles.headerRow, compact && styles.headerRowCompact]}>
         <Text style={styles.title}>Monthly Plan</Text>
         {plan.month ? <Text style={styles.monthBadge}>{plan.month}</Text> : null}
       </View>
 
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryItem}>
+  <View style={[styles.summaryRow, compact && styles.summaryRowCompact]}>
+  <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
           <Text style={styles.label}>Income</Text>
           <Text style={styles.value}>{currency(plan.income)}</Text>
         </View>
@@ -103,6 +104,18 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     borderLeftWidth: 3,
     borderLeftColor: colors.accent[500] || colors.primary[500],
+  },
+  containerCompact: {
+    padding: 8,
+  },
+  headerRowCompact: {
+    marginBottom: 4,
+  },
+  summaryRowCompact: {
+    marginBottom: 6,
+  },
+  summaryItemCompact: {
+    paddingVertical: 2,
   },
   headerRow: {
     flexDirection: 'row',

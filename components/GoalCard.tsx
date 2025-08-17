@@ -9,15 +9,16 @@ interface GoalCardProps {
   onPress?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  compact?: boolean;
 }
 
-export function GoalCard({ goal, onPress, onEdit, onDelete }: GoalCardProps) {
+export function GoalCard({ goal, onPress, onEdit, onDelete, compact }: GoalCardProps) {
   const progress = goal.current_amount / goal.target_amount;
   const daysLeft = Math.max(0, Math.ceil((new Date(goal.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+  <View style={[styles.container, compact && styles.containerCompact]}>
+  <View style={[styles.header, compact && styles.headerCompact]}>
         <View style={styles.iconContainer}>
           <Target size={20} color={colors.accent[500]} />
         </View>
@@ -39,7 +40,7 @@ export function GoalCard({ goal, onPress, onEdit, onDelete }: GoalCardProps) {
         </View>
       </View>
 
-      <View style={styles.progressContainer}>
+  <View style={[styles.progressContainer, compact && styles.progressContainerCompact]}>
         <View style={styles.progressBar}>
           <View 
             style={[styles.progressFill, { width: `${Math.min(progress * 100, 100)}%` }]} 
@@ -50,7 +51,7 @@ export function GoalCard({ goal, onPress, onEdit, onDelete }: GoalCardProps) {
         </Text>
       </View>
 
-      <View style={styles.amounts}>
+  <View style={[styles.amounts, compact && styles.amountsCompact]}>
         <Text style={styles.current}>
           ${goal.current_amount.toLocaleString()}
         </Text>
@@ -71,7 +72,7 @@ export function GoalCard({ goal, onPress, onEdit, onDelete }: GoalCardProps) {
           <Text style={styles.category}>{goal.category}</Text>
         </View>
       </View>
-    </View>
+  </View>
   );
 }
 
@@ -80,6 +81,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 'auto',
+  },
+  containerCompact: {
+    padding: 10,
+    marginHorizontal: 8,
   },
   actionBtn: {
     marginLeft: 8,
@@ -108,6 +113,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  headerCompact: {
+    marginBottom: 8,
+  },
   iconContainer: {
     width: 32,
     height: 32,
@@ -127,6 +135,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  progressContainerCompact: {
+    marginBottom: 6,
   },
   progressBar: {
     flex: 1,
@@ -151,6 +162,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     marginBottom: 16,
+  },
+  amountsCompact: {
+    marginBottom: 8,
   },
   current: {
     fontSize: 24,

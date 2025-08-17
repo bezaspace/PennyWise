@@ -299,3 +299,14 @@ class Quote(BaseModel):
     change: float
     change_percent: float
     last_updated: float
+    open: Optional[float] = None
+    day_high: Optional[float] = None
+    day_low: Optional[float] = None
+    market_cap: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    div_yield: Optional[float] = None
+    fifty_two_wk_high: Optional[float] = None
+    fifty_two_wk_low: Optional[float] = None
+
+    class Config:
+        from_attributes = True

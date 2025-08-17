@@ -10,9 +10,10 @@ interface BudgetProgressProps {
   budget: Budget;
   onEdit?: () => void;
   onDelete?: () => void;
+  compact?: boolean;
 }
 
-export function BudgetProgress({ budget, onEdit, onDelete }: BudgetProgressProps) {
+export function BudgetProgress({ budget, onEdit, onDelete, compact }: BudgetProgressProps) {
   const progress = Math.min(budget.spent / budget.limit, 1);
   const remaining = Math.max(budget.limit - budget.spent, 0);
   const isOverBudget = budget.spent > budget.limit;
@@ -34,7 +35,7 @@ export function BudgetProgress({ budget, onEdit, onDelete }: BudgetProgressProps
 
   const safeOnDelete = onDelete || (() => {});
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.containerCompact]}>
       <View style={styles.header}>
         <Text style={styles.category}>{budget.category || 'Unknown Category'}</Text>
         <Text style={styles.period}>{budget.period || 'monthly'}</Text>
@@ -49,8 +50,8 @@ export function BudgetProgress({ budget, onEdit, onDelete }: BudgetProgressProps
           </TouchableOpacity>
         </View>
       </View>
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
+  <View style={[styles.progressContainer, compact && styles.progressContainerCompact]}>
+        <View style={[styles.progressBar, compact && styles.progressBarCompact]}>
           <View 
             style={[
               styles.progressFill,
@@ -99,6 +100,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  containerCompact: {
+    padding: 8,
+    marginHorizontal: 8,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -121,12 +126,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  progressContainerCompact: {
+    marginBottom: 4,
+  },
   progressBar: {
     flex: 1,
     height: 8,
     backgroundColor: colors.neutral[700],
     borderRadius: 4,
     marginRight: 8,
+  },
+  progressBarCompact: {
+    height: 6,
   },
   progressFill: {
     height: '100%',

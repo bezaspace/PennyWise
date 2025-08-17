@@ -8,6 +8,7 @@ interface TransactionItemProps {
   transaction: Transaction;
   onPress?: () => void;
   onDelete?: (transactionId: string) => void;
+  compact?: boolean;
 }
 
 const categoryIcons: Record<string, any> = {
@@ -36,7 +37,7 @@ const categoryColors: Record<string, string> = {
   'Other': colors.neutral[400],
 };
 
-export function TransactionItem({ transaction, onPress, onDelete }: TransactionItemProps) {
+export function TransactionItem({ transaction, onPress, onDelete, compact }: TransactionItemProps) {
   const IconComponent = categoryIcons[transaction.category] || MoreHorizontal;
   const iconColor = categoryColors[transaction.category] || colors.neutral[400];
   const isPositive = transaction.amount > 0;
@@ -63,12 +64,12 @@ export function TransactionItem({ transaction, onPress, onDelete }: TransactionI
   };
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress}>
-      <View style={[styles.iconContainer, { backgroundColor: iconColor + '20' }]}>
+    <TouchableOpacity style={[styles.container, compact && styles.containerCompact]} onPress={onPress}>
+  <View style={[styles.iconContainer, compact && styles.iconContainerCompact, { backgroundColor: iconColor + '20' }]}>
         <IconComponent size={20} color={iconColor} />
       </View>
       
-      <View style={styles.content}>
+  <View style={styles.content}>
         <Text style={styles.description} numberOfLines={1}>
           {transaction.description}
         </Text>
@@ -78,7 +79,7 @@ export function TransactionItem({ transaction, onPress, onDelete }: TransactionI
         </View>
       </View>
       
-      <View style={styles.rightContainer}>
+  <View style={styles.rightContainer}>
         <Text style={[
           styles.amount,
           { color: isPositive ? colors.success[500] : colors.neutral[100] }
@@ -120,6 +121,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  containerCompact: {
+    padding: 8,
+    marginHorizontal: 8,
+    borderRadius: 8,
+  },
   iconContainer: {
     width: 40,
     height: 40,
@@ -127,6 +133,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+  },
+  iconContainerCompact: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
   },
   content: {
     flex: 1,

@@ -28,6 +28,7 @@ from models import (
 from ai import router as ai_router
 from adk_services import initialize_adk_services
 from stock_service import get_quote, get_quotes
+from stock_service import get_price_history
 
 load_dotenv()
 
@@ -741,6 +742,23 @@ def get_symbol_quote(symbol: str):
     if not q:
         raise HTTPException(status_code=404, detail="Quote not available")
     return QuoteModel(**q)
+
+
+@app.get("/api/investments/history/{symbol}")
+def get_symbol_history(symbol: str, period: str = "7d"):
+    """Return recent historical prices for the given symbol.
+
+    Response format: list of {"t": <unix_ms>, "price": <float>} ordered ascending by time.
+    """
+    try:
+        series = get_price_history(symbol, period=period)
+        if not series:
+            raise HTTPException(status_code=404, detail="History not available")
+        return series
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

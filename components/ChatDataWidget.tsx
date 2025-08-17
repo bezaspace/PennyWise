@@ -14,9 +14,10 @@ interface ChatDataWidgetProps {
   type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
   data: any;
   title?: string;
+  compact?: boolean;
 }
 
-export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
+export function ChatDataWidget({ type, data, title, compact }: ChatDataWidgetProps) {
   if (!data || data.length === 0) return null;
 
   const fmtCurrency = (n: number) => `$${Number(n || 0).toFixed(2)}`;
@@ -26,14 +27,15 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
     switch (type) {
       case 'transactions':
         return (
-          <View style={styles.widgetContainer}>
-            <Text style={styles.widgetTitle}>{title || 'Recent Transactions'}</Text>
+          <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+            <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Recent Transactions'}</Text>
             <View style={styles.transactionsContainer}>
               {data.map((transaction: Transaction, index: number) => (
-                <View key={index} style={styles.transactionItem}>
+                <View key={index} style={[styles.transactionItem, compact && styles.transactionItemCompact]}>
                   <TransactionItem 
                     transaction={transaction} 
                     onPress={() => {}} 
+                    compact={compact}
                   />
                 </View>
               ))}
@@ -43,12 +45,12 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
 
       case 'budgets':
         return (
-          <View style={styles.widgetContainer}>
-            <Text style={styles.widgetTitle}>{title || 'Budget Overview'}</Text>
+          <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+            <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Budget Overview'}</Text>
             <View style={styles.budgetsContainer}>
               {data.map((budget: Budget, index: number) => (
-                <View key={index} style={styles.budgetItem}>
-                  <BudgetProgress budget={budget} />
+                <View key={index} style={[styles.budgetItem, compact && styles.budgetItemCompact]}>
+                  <BudgetProgress budget={budget} compact={compact} />
                 </View>
               ))}
             </View>
@@ -57,12 +59,12 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
 
       case 'goals':
         return (
-          <View style={styles.widgetContainer}>
-            <Text style={styles.widgetTitle}>{title || 'Financial Goals'}</Text>
+          <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+            <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Financial Goals'}</Text>
             <View style={styles.goalsContainer}>
               {data.map((goal: Goal, index: number) => (
-                <View key={index} style={styles.goalItem}>
-                  <GoalCard goal={goal} onPress={() => {}} />
+                <View key={index} style={[styles.goalItem, compact && styles.goalItemCompact]}>
+                  <GoalCard goal={goal} onPress={() => {}} compact={compact} />
                 </View>
               ))}
             </View>
@@ -72,9 +74,9 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
       case 'plan':
         // Expect the data array to contain a single plan object
         return (
-          <View style={styles.widgetContainer}>
-            <Text style={styles.widgetTitle}>{title || 'Proposed Monthly Plan'}</Text>
-            <PlanPreview plan={Array.isArray(data) ? data[0] : data} />
+          <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+            <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Proposed Monthly Plan'}</Text>
+            <PlanPreview plan={Array.isArray(data) ? data[0] : data} compact={compact} />
           </View>
         );
 
@@ -210,8 +212,8 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
           </style>
         `;
           return (
-            <View style={styles.widgetContainer}>
-              <Text style={styles.widgetTitle}>{title || 'Market Research Sources'}</Text>
+            <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+              <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Market Research Sources'}</Text>
               <View style={styles.webviewContainer}>
                 <WebView
                   originWhitelist={['*']}
@@ -247,8 +249,8 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
         });
 
         return (
-          <View style={styles.widgetContainer}>
-            <Text style={styles.widgetTitle}>{title || 'Market Research Sources'}</Text>
+          <View style={[styles.widgetContainer, compact && styles.widgetContainerCompact]}>
+            <Text style={[styles.widgetTitle, compact && styles.widgetTitleCompact]}>{title || 'Market Research Sources'}</Text>
             <View style={styles.sourcesContainer}>
               {resultsArray.map((item: any, idx: number) => {
                 // If the title is just a placeholder like "Source 4", replace it with a sequential label
@@ -257,7 +259,7 @@ export function ChatDataWidget({ type, data, title }: ChatDataWidgetProps) {
                 return (
                   <TouchableOpacity
                     key={idx}
-                    style={styles.sourceItem}
+                    style={[styles.sourceItem, compact && styles.sourceItemCompact]}
                     onPress={() => { if (item.url && item.url !== '#') Linking.openURL(item.url); }}
                   >
                     <View style={styles.sourceTitleContainer}>
@@ -304,6 +306,14 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  widgetContainerCompact: {
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 4,
+    borderLeftWidth: 2,
+    shadowOpacity: 0.05,
+    elevation: 0,
+  },
   widgetTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -313,11 +323,18 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  widgetTitleCompact: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
   transactionsContainer: {
     gap: 4,
   },
   transactionItem: {
     marginHorizontal: -12, // Offset container padding
+  },
+  transactionItemCompact: {
+    marginHorizontal: -8,
   },
   budgetsContainer: {
     gap: 4,
@@ -325,11 +342,17 @@ const styles = StyleSheet.create({
   budgetItem: {
     marginHorizontal: -12, // Offset container padding
   },
+  budgetItemCompact: {
+    marginHorizontal: -8,
+  },
   goalsContainer: {
     gap: 4,
   },
   goalItem: {
     marginHorizontal: -12, // Offset container padding
+  },
+  goalItemCompact: {
+    marginHorizontal: -8,
   },
   table: {
     width: '100%',
@@ -413,6 +436,11 @@ const styles = StyleSheet.create({
     padding: 12,
     borderLeftWidth: 3,
     borderLeftColor: colors.primary[500],
+  },
+  sourceItemCompact: {
+    padding: 8,
+    borderRadius: 6,
+    borderLeftWidth: 2,
   },
   sourceHeader: {
     marginBottom: 6,

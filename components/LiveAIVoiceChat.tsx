@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-nati
 import { colors } from '@/constants/colors';
 import ReceiptUpload from './ReceiptUpload';
 import { ChatDataWidget } from './ChatDataWidget';
+import ToolCallWidget from './ToolCallWidget';
 import { parseAIResponseForToolData, parseToolResponse } from '@/utils/aiResponseParser';
 
 interface VoiceMessage {
@@ -15,6 +16,10 @@ interface VoiceMessage {
       type: 'transactions' | 'budgets' | 'goals' | 'plan' | 'holdings' | 'trades' | 'watchlist' | 'quote' | 'portfolio_summary' | 'market_research';
     data: any[];
   };
+  // Optional transient running-tool metadata
+  isToolRunning?: boolean;
+  toolName?: string;
+  toolCallId?: string;
 }
 
 type ReceiptOrItemData =
@@ -328,18 +333,34 @@ Please acknowledge that you've received this receipt information and ask if I'd 
           playBufferedAudio();
           // Don't add audio messages to the chat - just play them
         } else if (msg.mime_type === 'tool/call' && msg.tool_name) {
-          // Handle tool call - show that AI is using a tool
+          // Handle tool call - create a transient running-tool message
           console.log(`AI is calling tool: ${msg.tool_name}`);
+          const callId = msg.function_call_event_id || msg.tool_call_id || null;
           const toolMessage: VoiceMessage = {
-            id: Date.now().toString(),
+            id: (callId ? String(callId) : Date.now().toString()),
             isUser: false,
-            text: `🔧 Using ${msg.tool_name} tool...`
+            isToolRunning: true,
+            toolName: msg.tool_name,
+            toolCallId: callId || undefined,
           };
           setMessages(prev => [...prev, toolMessage]);
         } else if (msg.mime_type === 'tool/response' && msg.tool_name && msg.tool_response) {
           // Handle tool response - show the data as widgets
           console.log(`Tool ${msg.tool_name} responded with:`, msg.tool_response);
-          
+          // Remove transient running-tool message for this call (by id preferred)
+          const callId = msg.function_call_event_id || msg.tool_call_id || null;
+          setMessages(prev => {
+            if (callId) {
+              return prev.filter(m => !(m.isToolRunning && m.toolCallId && String(m.toolCallId) === String(callId)));
+            }
+            // Fallback: remove the first running message matching the tool name
+            let removed = false;
+            return prev.filter(m => {
+              if (!removed && m.isToolRunning && m.toolName === msg.tool_name) { removed = true; return false; }
+              return true;
+            });
+          });
+
           const toolData = parseToolResponse(msg.tool_name, msg.tool_response);
           if (toolData.hasToolData) {
             const toolResponseMessage: VoiceMessage = {
@@ -364,13 +385,13 @@ Please acknowledge that you've received this receipt information and ask if I'd 
           }
         } else if (msg.mime_type === 'text/plain' && msg.data) {
           setTranscript(msg.data);
-          
+
           // For final responses, we still parse for tool data as backup
           const toolData = parseAIResponseForToolData(msg.data);
-          
-          const newMessage: VoiceMessage = { 
-            id: Date.now().toString(), 
-            isUser: false, 
+
+          const newMessage: VoiceMessage = {
+            id: Date.now().toString(),
+            isUser: false,
             text: msg.data
           };
 
@@ -380,6 +401,21 @@ Please acknowledge that you've received this receipt information and ask if I'd 
               type: toolData.type!,
               data: toolData.data
             };
+          }
+
+          // If this text contains an implicit terminal for a running tool, remove the transient widget
+          const possibleCallId = msg.function_call_event_id || msg.tool_call_id || null;
+          if (possibleCallId) {
+            setMessages(prev => prev.filter(m => !(m.isToolRunning && m.toolCallId && String(m.toolCallId) === String(possibleCallId))));
+          } else if (toolData.hasToolData && toolData.type) {
+            // Remove one running message matching the detected tool type/name
+            setMessages(prev => {
+              let removed = false;
+              return prev.filter(m => {
+                if (!removed && m.isToolRunning && m.toolName === toolData.type) { removed = true; return false; }
+                return true;
+              });
+            });
           }
 
           // If this ever contains a plan (future-proof), replace any existing plan widget
@@ -396,10 +432,14 @@ Please acknowledge that you've received this receipt information and ask if I'd 
           // Handle AI interruption
           audioChunkBuffer.current = [];
           isPlayingAudio.current = false;
+          // Clear any running tool messages (interruption implies end)
+          setMessages(prev => prev.filter(m => !m.isToolRunning));
         } else if (msg.turn_complete) {
           console.log('AI turn complete');
           // Handle turn completion
           setTranscript('');
+          // Clear running tool messages at end of turn
+          setMessages(prev => prev.filter(m => !m.isToolRunning));
         } else if (msg.error) {
           console.error('WebSocket error message:', msg.message);
           setConnectionStatus('disconnected');
@@ -476,14 +516,19 @@ Please acknowledge that you've received this receipt information and ask if I'd 
       >
         {messages.map((msg) => (
           <View key={msg.id} style={[styles.messageContainer, msg.isUser ? styles.userMessage : styles.aiMessage]}>
-            {msg.text && (
-              <Text style={styles.messageText}>{msg.text}</Text>
+            {msg.isToolRunning ? (
+              <ToolCallWidget toolName={msg.toolName || 'Running tool...'} />
+            ) : (
+              msg.text && (
+                <Text style={styles.messageText}>{msg.text}</Text>
+              )
             )}
             {msg.toolData && (
               <View style={styles.toolDataContainer}>
                 <ChatDataWidget 
                   type={msg.toolData.type}
                   data={msg.toolData.data}
+                  compact={true}
                 />
               </View>
             )}
@@ -571,8 +616,8 @@ const styles = StyleSheet.create({
     marginLeft: 8
   },
   messagesContainer: { 
-    flex: 1, 
-    padding: 16 
+  flex: 1, 
+  padding: 8 
   },
   messageContainer: { 
     marginVertical: 8 
@@ -587,12 +632,12 @@ const styles = StyleSheet.create({
     color: colors.neutral[100], 
     fontSize: 16,
     backgroundColor: colors.neutral[800],
-    padding: 12,
+  padding: 8,
     borderRadius: 12,
     maxWidth: '80%'
   },
   toolDataContainer: {
-    marginTop: 8,
+  marginTop: 4,
     width: '100%',
   },
   controls: { 

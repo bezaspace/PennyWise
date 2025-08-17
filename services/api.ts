@@ -323,6 +323,19 @@ class ApiService {
     return this.apiRequest(`/api/investments/quote/${symbol}`);
   }
 
+  async getPriceHistory(symbol: string, period: string = '7d'): Promise<Array<{ t: number; price: number }>> {
+    // Backend expects periods like '1d', '5d', '1mo', '3mo', '6mo', etc.
+    const periodMap: Record<string, string> = {
+      '1d': '1d',
+      '1m': '1mo',
+      '6m': '6mo',
+      '7d': '7d',
+      '5d': '5d',
+    };
+    const backendPeriod = periodMap[period] || period;
+    return this.apiRequest(`/api/investments/history/${symbol}?period=${encodeURIComponent(backendPeriod)}`);
+  }
+
   async uploadReceipt(imageUri: string): Promise<{
     success: boolean;
     data?: any;
