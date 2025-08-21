@@ -79,6 +79,13 @@ export default function ReceiptUpload({ onReceiptProcessed, onError }: ReceiptUp
       console.log('ReceiptUpload: Processing result:', result);
       
       if (result.success && result.data) {
+        // Attach the original image URI so the chat UI can render the picture in-memory for this session
+        try {
+          (result.data as any).imageUri = imageUri;
+        } catch (e) {
+          // Non-critical if attaching fails
+          console.warn('ReceiptUpload: Could not attach imageUri to result.data', e);
+        }
         onReceiptProcessed(result.data as ReceiptOrItemData);
       } else {
         const errorMessage = result.error || result.message || 'Failed to process receipt';

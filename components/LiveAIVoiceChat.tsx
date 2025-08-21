@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import { colors } from '@/constants/colors';
 import ReceiptUpload from './ReceiptUpload';
 import { ChatDataWidget } from './ChatDataWidget';
@@ -33,6 +33,7 @@ type ReceiptOrItemData =
       description: string;
       items: string[];
       confidence: string;
+      imageUri?: string;
     }
   | {
       type: 'item';
@@ -43,6 +44,7 @@ type ReceiptOrItemData =
       detected_price: number | null;
       price_found: boolean;
       confidence: string;
+      imageUri?: string;
     };
 
 const DEFAULT_WS_URL = `ws://${window.location.hostname}:8000/api/ai/unified/voice/ws/user_123`;
@@ -545,9 +547,18 @@ Please acknowledge that you've received this receipt information and ask if I'd 
             {msg.isToolRunning ? (
               <ToolCallWidget toolName={msg.toolName || 'Running tool...'} />
             ) : (
-              msg.text && (
-                <Text style={styles.messageText}>{msg.text}</Text>
-              )
+              <>
+                {msg.receiptData?.imageUri && (
+                  <Image
+                    source={{ uri: String(msg.receiptData.imageUri) }}
+                    style={styles.fullImage}
+                    resizeMode="cover"
+                  />
+                )}
+                {msg.text && (
+                  <Text style={styles.messageText}>{msg.text}</Text>
+                )}
+              </>
             )}
             {msg.toolData && (
               <View style={styles.toolDataContainer}>
@@ -662,9 +673,9 @@ const styles = StyleSheet.create({
     color: colors.neutral[100], 
     fontSize: 16,
     backgroundColor: colors.neutral[800],
-  padding: 8,
+    padding: 8,
     borderRadius: 12,
-    maxWidth: '80%'
+    maxWidth: '100%'
   },
   toolDataContainer: {
   marginTop: 4,
@@ -719,6 +730,13 @@ const styles = StyleSheet.create({
     color: colors.neutral[100],
     fontSize: 14,
     fontWeight: '600'
+  },
+  fullImage: {
+    width: '100%',
+    height: 320,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: colors.neutral[700],
   },
   transcriptContainer: {
     backgroundColor: colors.neutral[800],
