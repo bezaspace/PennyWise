@@ -425,9 +425,27 @@ def get_financial_snapshot(payload: Optional[dict] = None) -> dict:
             for g in goals
         ]
 
-        # Latest plan (reuse helper)
+        # Latest plan — fetch directly from DB here to avoid emitting a separate
+        # queued tool response (get_latest_plan() calls queue_tool_response()).
         try:
-            latest_plan = get_latest_plan()
+            query = db.query(PlanDB)
+            plan_row = query.order_by(PlanDB.created_at.desc()).first()
+            if not plan_row:
+                latest_plan = None
+            else:
+                import json as _json
+                allocations = _json.loads(plan_row.allocations_json) if plan_row.allocations_json else []
+                goals = _json.loads(plan_row.goals_json) if plan_row.goals_json else []
+                latest_plan = {
+                    "id": plan_row.id,
+                    "month": plan_row.month,
+                    "income": plan_row.income,
+                    "savings_rate": plan_row.savings_rate,
+                    "emergency_fund_target": plan_row.emergency_fund_target,
+                    "allocations": allocations,
+                    "goals": goals,
+                    "status": plan_row.status,
+                }
         except Exception:
             latest_plan = None
 
