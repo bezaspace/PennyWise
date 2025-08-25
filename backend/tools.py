@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import (
@@ -354,6 +354,124 @@ def get_goals(user_id: str) -> List[Dict[str, Any]]:
             queue_tool_response("get_goals", result)
         except Exception:
             pass
+        return result
+    finally:
+        next(db_gen, None)
+
+
+def get_financial_snapshot(payload: Optional[dict] = None) -> dict:
+    """
+    Returns a complete, read-only financial snapshot for the agent to analyze.
+
+    payload (optional): {
+        user_id?: str,
+        days?: int  # window for recent transactions (default 90)
+    }
+
+    The snapshot intentionally EXCLUDES investments.trades/holdings/portfolio and watchlist
+    per product decision.
+    """
+    payload = payload or {}
+    user_id = payload.get("user_id") or "user_123"
+    days = int(payload.get("days", 90))
+
+    # Debug log for visibility in backend logs when this tool is invoked
+    try:
+        logger.info(f"get_financial_snapshot called for user={user_id} days={days}")
+    except Exception:
+        print(f"--- Tool: get_financial_snapshot called for user={user_id} days={days} ---")
+
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        # Transactions (all, and filtered recent)
+        all_tx = db.query(TransactionDB).order_by(TransactionDB.date.desc()).all()
+
+        cutoff = datetime.now() - timedelta(days=days)
+        recent_tx = []
+        tx_list = []
+        for t in all_tx:
+            # Build common transaction dict
+            txd = {
+                "id": t.id,
+                "description": t.description,
+                "amount": float(t.amount),
+                "category": t.category,
+                "date": t.date,
+                "type": (t.type.value if getattr(t, 'type', None) else None),
+            }
+            tx_list.append(txd)
+            # Try to parse date to filter recent transactions
+            try:
+                parsed = datetime.fromisoformat(t.date)
+            except Exception:
+                parsed = None
+            if parsed and parsed >= cutoff:
+                recent_tx.append(txd)
+
+        # Budgets, categories, goals
+        budgets = db.query(BudgetDB).all()
+        budgets_list = [
+            {"id": b.id, "category": b.category, "limit": float(b.limit), "spent": float(b.spent or 0.0), "period": b.period}
+            for b in budgets
+        ]
+
+        categories = db.query(CategoryDB).order_by(CategoryDB.name).all()
+        categories_list = [{"id": c.id, "name": c.name, "type": c.type} for c in categories]
+
+        goals = db.query(GoalDB).all()
+        goals_list = [
+            {"id": g.id, "title": g.title, "target_amount": float(g.target_amount), "current_amount": float(g.current_amount or 0.0), "deadline": g.deadline, "category": g.category}
+            for g in goals
+        ]
+
+        # Latest plan (reuse helper)
+        try:
+            latest_plan = get_latest_plan()
+        except Exception:
+            latest_plan = None
+
+        # Aggregates: total balance, monthly income/expenses estimate, spending by category (from recent window)
+        total_balance = sum((float(t.get("amount") or 0.0) for t in tx_list))
+
+        monthly_income = 0.0
+        monthly_expenses = 0.0
+        spending_by_category: Dict[str, float] = {}
+        for t in recent_tx:
+            amt = float(t.get("amount") or 0.0)
+            if t.get("type") == "income" or amt > 0:
+                monthly_income += amt if amt > 0 else 0.0
+            else:
+                # expense (stored as negative amounts in this DB)
+                monthly_expenses += abs(amt)
+                cat = t.get("category") or "Unknown"
+                spending_by_category[cat] = spending_by_category.get(cat, 0.0) + abs(amt)
+
+        aggregates = {
+            "total_balance": round(total_balance, 2),
+            "monthly_income_est": round(monthly_income, 2),
+            "monthly_expenses_est": round(monthly_expenses, 2),
+            "spending_by_category": {k: round(v, 2) for k, v in spending_by_category.items()},
+            "transactions_window_days": days,
+        }
+
+        result = {
+            "meta": {"user_id": user_id, "snapshot_time": datetime.now().isoformat(), "transactions_window_days": days},
+            "transactions": tx_list,
+            "recent_transactions": recent_tx,
+            "budgets": budgets_list,
+            "categories": categories_list,
+            "goals": goals_list,
+            "latest_plan": latest_plan,
+            # investments and watchlist intentionally excluded as requested
+            "aggregates": aggregates,
+        }
+
+        try:
+            queue_tool_response("get_financial_snapshot", result)
+        except Exception:
+            pass
+
         return result
     finally:
         next(db_gen, None)
